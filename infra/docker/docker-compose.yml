@@ -28,6 +28,10 @@ services:
       - "${HTTPS_PORT:-443}:443"
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/ota-locations.conf:/etc/nginx/ota-locations.conf:ro
+      # Uncomment after certbot (see docs/deployment.md):
+      # - ../nginx/nginx.ssl-server.conf:/etc/nginx/conf.d/ssl-server.conf:ro
+      # - ${SSL_CERT_DIR:-/etc/letsencrypt/live/release.mod-syria.org}:/etc/nginx/ssl:ro
     depends_on:
       dashboard:
         condition: service_healthy

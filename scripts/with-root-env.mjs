@@ -17,7 +17,8 @@ if (!existsSync(envPath)) {
   process.exit(1);
 }
 
-config({ path: envPath });
+// Root .env must win over stale shell exports (common on VPS / CI).
+config({ path: envPath, override: true });
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
