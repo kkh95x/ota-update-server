@@ -9,7 +9,7 @@ type DialogProps = {
   description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
 };
 
 export default function Dialog({

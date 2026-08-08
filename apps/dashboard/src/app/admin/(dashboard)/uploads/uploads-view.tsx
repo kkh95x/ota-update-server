@@ -17,6 +17,7 @@ type ReleaseOption = {
   codename: string;
   incrementalBuild: string;
   status: string;
+  validationFailureReason?: string | null;
   channelKey?: string;
 };
 
@@ -231,6 +232,9 @@ export default function UploadsView() {
                     <td>{r.incrementalBuild}</td>
                     <td>
                       <StatusBadge status={r.status} />
+                      {r.status === "QUARANTINED" && r.validationFailureReason && (
+                        <p className="validation-failure-reason">{r.validationFailureReason}</p>
+                      )}
                     </td>
                   </tr>
                 ))}

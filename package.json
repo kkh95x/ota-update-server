@@ -11,6 +11,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
     "install:deps": "node scripts/run-pnpm.mjs install",
+    "postinstall": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:generate",
     "db:generate": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:generate",
     "db:migrate": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:migrate",
     "db:push": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:push",

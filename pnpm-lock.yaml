@@ -117,6 +117,9 @@ importers:
       '@custom-os-ota/ota-protocol':
         specifier: workspace:*
         version: link:../../packages/ota-protocol
+      '@custom-os-ota/ota-validation':
+        specifier: workspace:*
+        version: link:../../packages/ota-validation
       bullmq:
         specifier: ^5.34.8
         version: 5.81.3
@@ -124,6 +127,9 @@ importers:
         specifier: ^5.4.2
         version: 5.11.1
     devDependencies:
+      '@prisma/client':
+        specifier: ^6.1.0
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       tsx:
         specifier: ^4.19.2
         version: 4.23.5
@@ -192,6 +198,9 @@ importers:
         specifier: ^6.1.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.1
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -232,6 +241,16 @@ importers:
         version: 5.9.3
 
   packages/ota-protocol:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/ota-validation:
+    dependencies:
+      '@custom-os-ota/object-storage':
+        specifier: workspace:*
+        version: link:../object-storage
     devDependencies:
       typescript:
         specifier: ^5.7.2

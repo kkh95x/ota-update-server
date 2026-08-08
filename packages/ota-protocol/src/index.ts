@@ -47,3 +47,19 @@ export function resolvePublishedPackageKey(
   }
   return publishedIncrementalKey(codename, sourceIncremental, targetIncremental);
 }
+
+export {
+  buildFullOtaDownloadKey,
+  buildIncrementalDownloadKey,
+  parseChannelMetadata,
+  resolveDownloadKeys,
+  shouldOfferUpdate,
+  type ParsedChannelMetadata,
+} from "./updater-client.js";
+export {
+  isValidOtaChannelKey,
+  RECOMMENDED_CHANNEL_ORDER,
+  sortOtaChannelKeys,
+  STANDARD_OTA_CHANNELS,
+  type StandardOtaChannel,
+} from "./channel-keys.js";

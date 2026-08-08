@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma, ReleaseStatus } from "@custom-os-ota/database";
+import { isValidOtaChannelKey, sortOtaChannelKeys } from "@custom-os-ota/ota-protocol";
 import { writeAudit } from "@custom-os-ota/audit";
 import { extractClientIp } from "@custom-os-ota/observability";
 import { requireAdminApi, isAuthFailure } from "@/lib/api-auth";
+import { extractValidationFailureReason } from "@/lib/validation-failure";
 
 export async function GET() {
   const auth = await requireAdminApi("release.read");
@@ -12,9 +14,13 @@ export async function GET() {
   const releases = await prisma.release.findMany({
     include: {
       deviceModel: { select: { codename: true, displayName: true } },
-      packages: { select: { id: true, packageType: true, byteSize: true } },
+      packages: { select: { id: true, packageType: true, byteSize: true, validationReport: true } },
       approvals: {
         include: { approver: { select: { email: true, displayName: true } } },
+      },
+      channelPublications: {
+        select: { channelKey: true },
+        orderBy: { publishedAt: "asc" },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -29,7 +35,15 @@ export async function GET() {
       incrementalBuild: r.incrementalBuild,
       postTimestamp: r.postTimestamp,
       channelKey: r.channelKey,
+      channelKeys:
+        r.channelPublications.length > 0
+          ? [...new Set([r.channelKey, ...r.channelPublications.map((p) => p.channelKey)])]
+          : r.targetChannelKeys.length > 0
+            ? sortOtaChannelKeys(r.targetChannelKeys)
+            : [r.channelKey],
       status: r.status,
+      validationFailureReason:
+        r.status === ReleaseStatus.QUARANTINED ? extractValidationFailureReason(r.packages) : null,
       codename: r.deviceModel.codename,
       deviceDisplayName: r.deviceModel.displayName,
       packageCount: r.packages.length,
@@ -46,7 +60,10 @@ const createSchema = z.object({
   buildId: z.string().min(1).max(64),
   incrementalBuild: z.string().min(1).max(32),
   postTimestamp: z.string().regex(/^\d{9,11}$/, "must be UTC epoch seconds"),
-  channelKey: z.enum(["stable", "beta", "alpha"]),
+  channelKeys: z
+    .array(z.string().min(1).max(64).refine(isValidOtaChannelKey, "invalid channel key"))
+    .min(1)
+    .max(10),
   changelog: z.string().max(5000).optional(),
   buildFingerprint: z.string().max(256).optional(),
   androidVersion: z.string().max(32).optional(),
@@ -70,6 +87,8 @@ export async function POST(request: Request) {
   }
 
   const { clientIp, forwardedFor } = extractClientIp(request.headers);
+  const channelKeys = sortOtaChannelKeys(body.data.channelKeys);
+  const channelKey = channelKeys[0]!;
 
   const release = await prisma.release.create({
     data: {
@@ -78,7 +97,8 @@ export async function POST(request: Request) {
       buildId: body.data.buildId,
       incrementalBuild: body.data.incrementalBuild,
       postTimestamp: body.data.postTimestamp,
-      channelKey: body.data.channelKey,
+      channelKey,
+      targetChannelKeys: channelKeys,
       changelog: body.data.changelog,
       buildFingerprint: body.data.buildFingerprint,
       androidVersion: body.data.androidVersion,
@@ -97,6 +117,7 @@ export async function POST(request: Request) {
       codename: release.deviceModel.codename,
       incrementalBuild: release.incrementalBuild,
       channelKey: release.channelKey,
+      targetChannelKeys: release.targetChannelKeys,
     },
     clientIp,
     forwardedFor,

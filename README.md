@@ -6,7 +6,7 @@ Self-hosted OTA platform for a GrapheneOS-based custom Android build (Pixel devi
 
 - **Monorepo:** pnpm + Turborepo
 - **Dashboard:** Next.js 15 (App Router)
-- **Worker:** BullMQ + Redis
+- **Worker:** BullMQ + Redis (validation + publish)
 - **Database:** PostgreSQL + Prisma
 - **Storage:** MinIO (S3-compatible) in Docker Compose
 - **Domain:** `https://release.mod-syria.org/`
@@ -39,11 +39,6 @@ docker compose up -d postgres redis minio minio-init
 cd ../..
 # Root .env is created by generate-env (or copy .env.example manually)
 
-# Windows: pnpm is usually not global — use from repo root:
-#   npm run db:push
-#   .\run-pnpm.cmd db:push
-#   node scripts/run-pnpm.mjs install
-
 node scripts/run-pnpm.mjs install
 npm run db:generate
 npm run db:push
@@ -63,7 +58,7 @@ npm run create-admin -- admin@example.com "YourSecurePassword"
 
 ## Documentation
 
-- [GrapheneOS Updater protocol](docs/grapheneos-updater-protocol. -md)
+- [GrapheneOS Updater protocol](docs/grapheneos-updater-protocol.md)
 - [Architecture](docs/architecture.md)
 - [Deployment](docs/deployment.md)
 - [Device groups & rollouts](docs/device-groups-and-rollouts.md)
@@ -76,7 +71,8 @@ npm run create-admin -- admin@example.com "YourSecurePassword"
 |-------|--------|
 | 1 Discovery | Done |
 | 2 Foundation | Done |
-| 3 Release management | In progress |
-| 4 OTA protocol | Planned |
+| 3 Release management | Done |
+| 4 OTA protocol | In progress (publish + validation + contract tests) |
+| 5 Rollouts | Planned |
 
 See [implementation plan](docs/implementation-plan.md).

@@ -85,6 +85,39 @@ docker compose up -d
 - External nginx/HAProxy with health checks
 - Session store in Redis (not in-memory)
 
+### Publish images to GitHub Container Registry (GHCR)
+
+Images (owner `kkh95x`):
+
+| Image | Purpose |
+|-------|---------|
+| `ghcr.io/kkh95x/ota-update-server-dashboard:latest` | Next.js admin + API |
+| `ghcr.io/kkh95x/ota-update-server-worker:latest` | BullMQ validation/publish worker |
+
+**CI:** push to `main` runs [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) and pushes both images.
+
+**Local build + push (Windows):**
+
+```powershell
+# 1. Create a GitHub PAT with write:packages
+# 2. Login
+docker login ghcr.io -u kkh95x
+
+# 3. Build and push
+powershell -File scripts/docker-build-push.ps1 -Push
+```
+
+**Deploy pulled images:** set in `infra/docker/.env`:
+
+```env
+DASHBOARD_IMAGE=ghcr.io/kkh95x/ota-update-server-dashboard:latest
+WORKER_IMAGE=ghcr.io/kkh95x/ota-update-server-worker:latest
+```
+
+Then `docker compose pull dashboard worker && docker compose up -d`.
+
+Make packages **public** in GitHub → Packages if the server pulls without registry login.
+
 ---
 
 ## Mode B — Kubernetes (optional)

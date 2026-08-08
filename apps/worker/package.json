@@ -17,10 +17,12 @@
     "@custom-os-ota/object-storage": "workspace:*",
     "@custom-os-ota/observability": "workspace:*",
     "@custom-os-ota/ota-protocol": "workspace:*",
+    "@custom-os-ota/ota-validation": "workspace:*",
     "bullmq": "^5.34.8",
     "ioredis": "^5.4.2"
   },
   "devDependencies": {
+    "@prisma/client": "^6.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

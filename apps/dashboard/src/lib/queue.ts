@@ -4,6 +4,7 @@ import { loadEnv } from "@custom-os-ota/configuration";
 
 let validationQueue: Queue | undefined;
 let publishQueue: Queue | undefined;
+let promoteQueue: Queue | undefined;
 let connection: Redis | undefined;
 
 function getConnection(): Redis {
@@ -28,6 +29,13 @@ export function getPublishQueue(): Queue {
   return publishQueue;
 }
 
+export function getPromoteQueue(): Queue {
+  if (!promoteQueue) {
+    promoteQueue = new Queue("ota-promote", { connection: getConnection() });
+  }
+  return promoteQueue;
+}
+
 export type ValidationJobPayload = {
   validationJobId: string;
   uploadSessionId: string;
@@ -35,6 +43,13 @@ export type ValidationJobPayload = {
 
 export type PublishJobPayload = {
   releaseId: string;
+  publishedById?: string;
+};
+
+export type PromoteJobPayload = {
+  releaseId: string;
+  channelKeys: string[];
+  publishedById: string;
 };
 
 export async function enqueueValidationJob(payload: ValidationJobPayload): Promise<void> {
@@ -48,6 +63,15 @@ export async function enqueueValidationJob(payload: ValidationJobPayload): Promi
 export async function enqueuePublishJob(payload: PublishJobPayload): Promise<void> {
   await getPublishQueue().add("publish-ota", payload, {
     jobId: `publish-${payload.releaseId}`,
+    removeOnComplete: 100,
+    removeOnFail: 200,
+  });
+}
+
+export async function enqueuePromoteJob(payload: PromoteJobPayload): Promise<void> {
+  const jobKey = payload.channelKeys.slice().sort().join(",");
+  await getPromoteQueue().add("promote-ota", payload, {
+    jobId: `promote-${payload.releaseId}-${jobKey}`,
     removeOnComplete: 100,
     removeOnFail: 200,
   });

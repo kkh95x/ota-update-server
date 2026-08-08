@@ -2,18 +2,15 @@ import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import { loadEnv } from "@custom-os-ota/configuration";
 import { prisma, ReleaseStatus } from "@custom-os-ota/database";
-import {
-  copyObject,
-  getTextObject,
-  putTextObject,
-} from "@custom-os-ota/object-storage";
-import {
-  formatChannelMetadata,
-  publishedMetadataKey,
-  publicArtifactUrl,
-  resolvePublishedPackageKey,
-} from "@custom-os-ota/ota-protocol";
+import { isValidOtaChannelKey, publicArtifactUrl, publishedMetadataKey } from "@custom-os-ota/ota-protocol";
 import { createLogger } from "@custom-os-ota/observability";
+import {
+  ensurePublishedPackages,
+  findExistingPublishedChannelKeys,
+  publishChannelMetadata,
+  resolvePublishChannelKeys,
+  type ReleaseWithPackages,
+} from "./channel-publish.js";
 import type { PublishJobPayload } from "./publish-types.js";
 
 const log = createLogger("worker");
@@ -24,15 +21,13 @@ async function isOtaGloballyPaused(): Promise<boolean> {
 }
 
 export async function processPublish(payload: PublishJobPayload): Promise<{ ok: boolean; summary: string }> {
-  const env = loadEnv();
-
-  const release = await prisma.release.findUnique({
+  const release = (await prisma.release.findUnique({
     where: { id: payload.releaseId },
     include: {
       deviceModel: true,
       packages: true,
     },
-  });
+  })) as ReleaseWithPackages | null;
 
   if (!release) {
     return { ok: false, summary: "release not found" };
@@ -59,52 +54,24 @@ export async function processPublish(payload: PublishJobPayload): Promise<{ ok: 
   }
 
   const codename = release.deviceModel.codename;
-  const copiedKeys: string[] = [];
+  const copiedKeys = await ensurePublishedPackages(release);
 
-  for (const pkg of release.packages) {
-    const destKey = resolvePublishedPackageKey(
-      codename,
-      pkg.packageType,
-      pkg.targetIncremental,
-      pkg.sourceIncremental,
-    );
+  const channelsToPublish = resolvePublishChannelKeys(release);
 
-    await copyObject({
-      sourceBucket: env.S3_BUCKET_QUARANTINE,
-      sourceKey: pkg.objectKey,
-      destBucket: env.S3_BUCKET_PUBLISHED,
-      destKey,
+  const publishedChannels: string[] = [];
+  let metadataKey = "";
+  let metadataUrl = "";
+
+  for (const channelKey of channelsToPublish) {
+    const result = await publishChannelMetadata({
+      release,
+      channelKey,
+      publishedById: payload.publishedById,
     });
-
-    copiedKeys.push(destKey);
+    publishedChannels.push(channelKey);
+    metadataKey = result.metadataKey;
+    metadataUrl = result.metadataUrl;
   }
-
-  const metadataKey = publishedMetadataKey(codename, release.channelKey);
-  const existingMetadata = await getTextObject(env.S3_BUCKET_PUBLISHED, metadataKey);
-
-  if (existingMetadata) {
-    await prisma.channelSnapshot.create({
-      data: {
-        deviceModelId: release.deviceModelId,
-        channelKey: release.channelKey,
-        metadataBody: existingMetadata,
-        objectKey: metadataKey,
-      },
-    });
-  }
-
-  const metadataBody = formatChannelMetadata({
-    incrementalBuild: release.incrementalBuild,
-    postTimestamp: release.postTimestamp,
-    codename,
-    channelKey: release.channelKey,
-  });
-
-  await putTextObject({
-    bucket: env.S3_BUCKET_PUBLISHED,
-    objectKey: metadataKey,
-    body: metadataBody,
-  });
 
   await prisma.release.update({
     where: { id: release.id },
@@ -120,14 +87,15 @@ export async function processPublish(payload: PublishJobPayload): Promise<{ ok: 
       releaseId: release.id,
       codename,
       channelKey: release.channelKey,
+      publishedChannels,
       metadataKey,
-      metadataUrl: publicArtifactUrl(env.OTA_PUBLIC_BASE_URL, metadataKey),
+      metadataUrl,
       copiedKeys,
     },
     result: "success",
   });
 
-  return { ok: true, summary: "published" };
+  return { ok: true, summary: `published to ${publishedChannels.join(", ")}` };
 }
 
 export function startPublishWorker(connection: Redis, concurrency: number): Worker<PublishJobPayload> {
@@ -159,6 +127,121 @@ export function startPublishWorker(connection: Redis, concurrency: number): Work
   worker.on("failed", (job, err) => {
     log.error("publish.job.failed", {
       event: "publish.job.failed",
+      metadata: { jobId: job?.id, releaseId: job?.data.releaseId, error: err.message },
+      result: "failure",
+    });
+  });
+
+  return worker;
+}
+
+export type PromoteJobPayload = {
+  releaseId: string;
+  channelKeys: string[];
+  publishedById: string;
+};
+
+export async function processPromote(payload: PromoteJobPayload): Promise<{ ok: boolean; summary: string }> {
+  const release = (await prisma.release.findUnique({
+    where: { id: payload.releaseId },
+    include: { deviceModel: true, packages: true },
+  })) as ReleaseWithPackages | null;
+
+  if (!release) {
+    return { ok: false, summary: "release not found" };
+  }
+
+  if (release.status !== ReleaseStatus.PUBLISHED) {
+    return { ok: false, summary: "release must be published before promotion" };
+  }
+
+  if (await isOtaGloballyPaused()) {
+    return { ok: false, summary: "ota offers paused globally" };
+  }
+
+  if (!release.postTimestamp) {
+    return { ok: false, summary: "postTimestamp missing on release" };
+  }
+
+  if (release.packages.length === 0) {
+    return { ok: false, summary: "no packages attached" };
+  }
+
+  const uniqueKeys = [...new Set(payload.channelKeys)];
+  for (const channelKey of uniqueKeys) {
+    if (!isValidOtaChannelKey(channelKey)) {
+      return { ok: false, summary: `invalid channel: ${channelKey}` };
+    }
+    if (channelKey === release.channelKey) {
+      return { ok: false, summary: `channel already origin: ${channelKey}` };
+    }
+  }
+
+  const existingKeys = await findExistingPublishedChannelKeys(release.id, uniqueKeys);
+  if (existingKeys.length > 0) {
+    return { ok: false, summary: `already published on: ${existingKeys.join(", ")}` };
+  }
+
+  await ensurePublishedPackages(release);
+
+  const promoted: string[] = [];
+  for (const channelKey of uniqueKeys) {
+    await publishChannelMetadata({
+      release,
+      channelKey,
+      publishedById: payload.publishedById,
+    });
+    promoted.push(channelKey);
+  }
+
+  const env = loadEnv();
+  const codename = release.deviceModel.codename;
+
+  log.info("promote.completed", {
+    event: "promote.completed",
+    metadata: {
+      releaseId: release.id,
+      codename,
+      promotedChannels: promoted,
+      metadataUrls: promoted.map((ch) =>
+        publicArtifactUrl(env.OTA_PUBLIC_BASE_URL, publishedMetadataKey(codename, ch)),
+      ),
+    },
+    result: "success",
+  });
+
+  return { ok: true, summary: `promoted to ${promoted.join(", ")}` };
+}
+
+export function startPromoteWorker(connection: Redis, concurrency: number): Worker<PromoteJobPayload> {
+  const worker = new Worker<PromoteJobPayload>(
+    "ota-promote",
+    async (bullJob) => {
+      log.info("promote.job.received", {
+        event: "promote.job.received",
+        metadata: { jobId: bullJob.id, releaseId: bullJob.data.releaseId, channelKeys: bullJob.data.channelKeys },
+      });
+
+      const result = await processPromote(bullJob.data);
+
+      log.info("promote.job.finished", {
+        event: "promote.job.finished",
+        metadata: { jobId: bullJob.id, ok: result.ok, summary: result.summary },
+        result: result.ok ? "success" : "failure",
+      });
+
+      if (!result.ok) {
+        throw new Error(result.summary);
+      }
+
+      return result;
+    },
+    { connection, concurrency },
+  );
+
+  worker.on("failed", (job, err) => {
+    log.error("promote.job.failed", {
+      event: "promote.job.failed",
       metadata: { jobId: job?.id, releaseId: job?.data.releaseId, error: err.message },
       result: "failure",
     });

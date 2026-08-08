@@ -6,8 +6,8 @@ import {
   ReleaseStatus,
   ValidationStatus,
 } from "@custom-os-ota/database";
-import { headObject } from "@custom-os-ota/object-storage";
 import { createLogger } from "@custom-os-ota/observability";
+import { validateOtaPackage } from "@custom-os-ota/ota-validation";
 import type { ValidationJobPayload } from "./validation-types.js";
 
 const log = createLogger("worker");
@@ -32,20 +32,48 @@ async function processValidation(payload: ValidationJobPayload): Promise<{ ok: b
     data: { status: ValidationStatus.RUNNING, startedAt: new Date() },
   });
 
-  const head = await headObject(env.S3_BUCKET_QUARANTINE, job.uploadSession.objectKey);
-  const passed = head != null && (!job.uploadSession.expectedSize || head.size === job.uploadSession.expectedSize);
-
-  const report = {
-    objectKey: job.uploadSession.objectKey,
-    byteSize: head?.size.toString() ?? null,
-    expectedSize: job.uploadSession.expectedSize?.toString() ?? null,
-    checks: {
-      objectExists: head != null,
-      sizeMatches: passed,
+  const otaPackage = await prisma.otaPackage.findFirst({
+    where: { objectKey: job.uploadSession.objectKey },
+    include: {
+      release: {
+        include: { deviceModel: true },
+      },
     },
-  };
+  });
 
-  const summary = passed ? "Package present in quarantine; size check passed" : "Validation failed";
+  if (!otaPackage) {
+    const report = { error: "ota_package_not_linked" };
+    await prisma.$transaction(async (tx) => {
+      await tx.validationResult.create({
+        data: {
+          jobId: job.id,
+          passed: false,
+          reportJson: report,
+          reportSummary: "No OTA package linked to upload session",
+        },
+      });
+      await tx.validationJob.update({
+        where: { id: job.id },
+        data: { status: ValidationStatus.FAILED, finishedAt: new Date() },
+      });
+    });
+    return { ok: false, summary: "ota package not linked" };
+  }
+
+  const validation = await validateOtaPackage({
+    bucket: env.S3_BUCKET_QUARANTINE,
+    objectKey: job.uploadSession.objectKey,
+    expectedSize: job.uploadSession.expectedSize,
+    maxBytes: env.OTA_MAX_PACKAGE_BYTES,
+    expectedCodename: otaPackage.release.deviceModel.codename,
+    expectedTargetIncremental: otaPackage.targetIncremental,
+    expectedSourceIncremental: otaPackage.sourceIncremental,
+    packageType: otaPackage.packageType,
+  });
+
+  const passed = validation.passed;
+  const report = validation.report;
+  const summary = validation.summary;
 
   await prisma.$transaction(async (tx) => {
     await tx.validationResult.create({
@@ -65,28 +93,22 @@ async function processValidation(payload: ValidationJobPayload): Promise<{ ok: b
       },
     });
 
-    const otaPackage = await tx.otaPackage.findFirst({
-      where: { objectKey: job.uploadSession.objectKey },
+    await tx.otaPackage.update({
+      where: { id: otaPackage.id },
+      data: {
+        validationReport: report,
+        sha256: report.sha256,
+        signatureValid: report.checks.signatureValid,
+      },
     });
 
-    if (otaPackage) {
-      await tx.otaPackage.update({
-        where: { id: otaPackage.id },
-        data: {
-          validationReport: report,
-          sha256: passed ? "pending-stage4" : null,
-          signatureValid: passed ? null : false,
-        },
-      });
-
-      await tx.release.update({
-        where: { id: otaPackage.releaseId },
-        data: {
-          status: passed ? ReleaseStatus.PENDING_APPROVAL : ReleaseStatus.QUARANTINED,
-          validatedAt: passed ? new Date() : undefined,
-        },
-      });
-    }
+    await tx.release.update({
+      where: { id: otaPackage.releaseId },
+      data: {
+        status: passed ? ReleaseStatus.PENDING_APPROVAL : ReleaseStatus.QUARANTINED,
+        validatedAt: passed ? new Date() : undefined,
+      },
+    });
   });
 
   return { ok: passed, summary };

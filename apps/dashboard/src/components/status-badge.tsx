@@ -13,7 +13,7 @@ const STATUS_LABELS: Record<string, string> = {
 export default function StatusBadge({ status }: { status: string }) {
   const label = STATUS_LABELS[status] ?? status;
   const tone =
-    status === "REVOKED" || status === "FAILED"
+    status === "REVOKED" || status === "FAILED" || status === "QUARANTINED"
       ? "danger"
       : status === "APPROVED" || status === "PUBLISHED"
         ? "success"

@@ -1,6 +1,6 @@
 # Implementation Plan
 
-## Stage 1 — Discovery and design ✅ (in progress)
+## Stage 1 — Discovery and design ✅
 
 - [x] Inspect GrapheneOS Updater source (`17` branch)
 - [x] Document protocol → `docs/grapheneos-updater-protocol.md`
@@ -13,9 +13,7 @@
 - [x] Storage: self-hosted MinIO in Docker Compose
 - [x] Large requests: nginx + MinIO tuned for multi-GB OTA
 
-## Stage 1 — Discovery and design ✅
-
-## Stage 2 — Foundation 🚧 (in progress)
+## Stage 2 — Foundation ✅
 
 - [x] pnpm + Turborepo monorepo
 - [x] packages/configuration, shared, observability, database, audit, auth, authorization
@@ -27,27 +25,28 @@
 - [x] Validation worker (basic size/exists check)
 - [x] Two-person approval workflow
 - [x] System health + global pause settings UI
-- [ ] docker compose full stack verification
+- [ ] docker compose full stack verification (manual E2E)
 
-## Stage 3 — Release management 🚧 (in progress)
+## Stage 3 — Release management ✅
 
 - [x] Device models CRUD (dashboard)
 - [x] Releases CRUD + detail view
 - [x] Presigned upload to quarantine (MinIO)
 - [x] Upload session lifecycle + validation job enqueue
-- [x] BullMQ validation worker (basic checks)
+- [x] BullMQ validation worker (SHA-256, ZIP metadata, identity checks)
 - [x] Two-person approval workflow
 - [x] Global pause/resume settings UI
-- [ ] Full OTA signature/metadata validation
-- [ ] Publish pipeline (quarantine → public)
+- [x] Publish pipeline (quarantine → public)
+- [ ] Full RSA signature verification (requires trusted OTA certs in env)
 
-## Stage 4 — Updater-compatible OTA endpoints
+## Stage 4 — Updater-compatible OTA endpoints 🚧
 
-- `packages/ota-protocol` — path builders, metadata formatter (match `generate-metadata`)
-- Publication worker: quarantine → public prefix
-- nginx config for Range, immutable caching, no compression on zips
-- Fake Updater client + protocol contract tests
-- `docs/updater-integration.md`, `docs/compatibility-matrix.md`
+- [x] `packages/ota-protocol` — path builders, metadata formatter, fake Updater client
+- [x] Publication worker: quarantine → public prefix
+- [x] nginx config for Range, immutable caching, no compression on zips
+- [x] Protocol contract tests (`ota-protocol`, `ota-validation` unit tests)
+- [ ] Live E2E with Pixel + real zip on production nginx
+- [ ] `docs/updater-integration.md` (optional ops guide)
 
 ## Stage 5 — Rollouts and device reporting
 
@@ -82,5 +81,5 @@
 
 ```
 configuration → database → object-storage → auth → dashboard shell
-                         → worker → ota-validation → ota-protocol → publish pipeline
+                         → ota-validation → worker → ota-protocol → publish pipeline
 ```

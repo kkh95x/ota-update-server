@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   CopyObjectCommand,
   GetObjectCommand,
@@ -10,20 +11,34 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { loadEnv } from "@custom-os-ota/configuration";
 
 let client: S3Client | undefined;
+let publicClient: S3Client | undefined;
 
-export function getS3Client(): S3Client {
-  if (client) return client;
+function s3ClientOptions(endpoint: string, forcePathStyle: boolean) {
   const env = loadEnv();
-  client = new S3Client({
-    endpoint: env.S3_ENDPOINT,
+  return {
+    endpoint,
     region: "us-east-1",
     credentials: {
       accessKeyId: env.S3_ACCESS_KEY_ID,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
     },
-    forcePathStyle: true,
-  });
+    forcePathStyle,
+  };
+}
+
+export function getS3Client(): S3Client {
+  if (client) return client;
+  const env = loadEnv();
+  client = new S3Client(s3ClientOptions(env.S3_ENDPOINT, env.S3_FORCE_PATH_STYLE));
   return client;
+}
+
+/** Presigned URLs must target the browser-reachable endpoint (often nginx /s3/). */
+export function getPublicS3Client(): S3Client {
+  if (publicClient) return publicClient;
+  const env = loadEnv();
+  publicClient = new S3Client(s3ClientOptions(env.S3_PUBLIC_ENDPOINT, env.S3_FORCE_PATH_STYLE));
+  return publicClient;
 }
 
 export async function checkStorageHealth(): Promise<boolean> {
@@ -44,7 +59,7 @@ export async function presignPutObject(params: {
   contentType?: string;
   expiresInSeconds?: number;
 }): Promise<string> {
-  const s3 = getS3Client();
+  const s3 = getPublicS3Client();
   const command = new PutObjectCommand({
     Bucket: params.bucket,
     Key: params.objectKey,
@@ -62,6 +77,43 @@ export async function headObject(bucket: string, objectKey: string): Promise<{ s
   } catch {
     return null;
   }
+}
+
+export async function getObjectRange(
+  bucket: string,
+  objectKey: string,
+  start: number,
+  end: number,
+): Promise<Buffer> {
+  const s3 = getS3Client();
+  const result = await s3.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: objectKey,
+      Range: `bytes=${start}-${end}`,
+    }),
+  );
+  if (!result.Body) {
+    throw new Error("empty_range_response");
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function streamObjectSha256(bucket: string, objectKey: string): Promise<string> {
+  const s3 = getS3Client();
+  const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
+  if (!result.Body) {
+    throw new Error("empty_object_body");
+  }
+  const hash = createHash("sha256");
+  for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
 }
 
 export function quarantineObjectKey(sessionId: string, filename: string): string {

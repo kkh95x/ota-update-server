@@ -16,7 +16,7 @@ const ROLES: { name: AdminRoleName; description: string; permissions: string[] }
   {
     name: "RELEASE_PUBLISHER",
     description: "Publish approved releases",
-    permissions: ["release.publish", "rollout.manage", "device.write", "release.create"],
+    permissions: ["release.publish", "release.promote", "rollout.manage", "device.write", "release.create"],
   },
   {
     name: "RELEASE_REVIEWER",

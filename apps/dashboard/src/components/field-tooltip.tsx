@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-const PANEL_WIDTH = 280;
+const PANEL_WIDTH = 340;
 const PANEL_GAP = 6;
 
 export default function FieldTooltip({ text }: { text: string }) {

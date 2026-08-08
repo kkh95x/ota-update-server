@@ -22,6 +22,11 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().min(1),
   S3_BUCKET_QUARANTINE: z.string().min(1).default("ota-quarantine"),
   S3_BUCKET_PUBLISHED: z.string().min(1).default("ota-published"),
+  /** MinIO and path-style gateways need true; AWS virtual-hosted style uses false. */
+  S3_FORCE_PATH_STYLE: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
   OTA_MAX_PACKAGE_BYTES: z.coerce.number().int().positive().default(8_589_934_592),
   ROLLOUT_HASH_SECRET: z.string().min(32),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

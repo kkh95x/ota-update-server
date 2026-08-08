@@ -34,8 +34,9 @@ model AdminUser {
   sessions         AdminSession[]
   roles            AdminRole[]
   auditLogs        AuditLog[]    @relation("AuditActor")
-  uploads          UploadSession[]
-  approvals        ReleaseApproval[]
+  uploads               UploadSession[]
+  approvals             ReleaseApproval[]
+  channelPublications   ReleaseChannelPublication[]
 }
 
 model AdminSession {
@@ -172,6 +173,7 @@ model Release {
   androidVersion     String?
   securityPatchLevel String?
   channelKey         String
+  targetChannelKeys  String[]      @default([])
   status             ReleaseStatus @default(DRAFT)
   changelog          String?
   minSourceIncremental String?
@@ -186,7 +188,21 @@ model Release {
   approvals          ReleaseApproval[]
   revocations        ReleaseRevocation[]
   rollouts           Rollout[]
+  channelPublications ReleaseChannelPublication[]
   @@unique([deviceModelId, channelKey, incrementalBuild])
+}
+
+model ReleaseChannelPublication {
+  id                String    @id @default(cuid())
+  releaseId         String
+  release           Release   @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  channelKey        String
+  metadataObjectKey String
+  publishedAt       DateTime  @default(now())
+  publishedById     String?
+  publishedBy       AdminUser? @relation(fields: [publishedById], references: [id], onDelete: SetNull)
+  @@unique([releaseId, channelKey])
+  @@index([releaseId, publishedAt])
 }
 
 model OtaPackage {

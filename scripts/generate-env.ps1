@@ -94,6 +94,11 @@ $DatabaseUrl = "postgresql://ota:$PostgresPassword@localhost:5432/ota"
 Set-EnvValue -FilePath $DockerEnv -Key "POSTGRES_PASSWORD" -Value $PostgresPassword
 Set-EnvValue -FilePath $DockerEnv -Key "MINIO_ROOT_PASSWORD" -Value $MinioRootPassword
 Set-EnvValue -FilePath $DockerEnv -Key "MINIO_ROOT_USER" -Value $MinioRootUser
+Set-EnvValue -FilePath $DockerEnv -Key "AUTH_SECRET" -Value $AuthSecret
+Set-EnvValue -FilePath $DockerEnv -Key "CSRF_SECRET" -Value $CsrfSecret
+Set-EnvValue -FilePath $DockerEnv -Key "ROLLOUT_HASH_SECRET" -Value $RolloutHashSecret
+Set-EnvValue -FilePath $DockerEnv -Key "S3_ACCESS_KEY_ID" -Value $MinioRootUser
+Set-EnvValue -FilePath $DockerEnv -Key "S3_SECRET_ACCESS_KEY" -Value $MinioRootPassword
 
 Set-EnvValue -FilePath $RootEnv -Key "DATABASE_URL" -Value $DatabaseUrl
 Set-EnvValue -FilePath $RootEnv -Key "AUTH_SECRET" -Value $AuthSecret

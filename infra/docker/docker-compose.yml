@@ -1,7 +1,24 @@
 # CUSTOM_OS OTA — production stack (Docker Compose, self-hosted MinIO)
-# Usage: cp .env.example .env && docker compose up -d
+# Usage: cp .env.example .env && npm run generate-env && docker compose up -d
 
 name: custom-os-ota
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://ota:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/ota
+  REDIS_URL: redis://redis:6379
+  AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in infra/docker/.env}
+  CSRF_SECRET: ${CSRF_SECRET:?set CSRF_SECRET in infra/docker/.env}
+  ROLLOUT_HASH_SECRET: ${ROLLOUT_HASH_SECRET:?set ROLLOUT_HASH_SECRET in infra/docker/.env}
+  OTA_PUBLIC_BASE_URL: ${OTA_PUBLIC_BASE_URL:-https://release.mod-syria.org/}
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-https://release.mod-syria.org/s3}
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  S3_BUCKET_QUARANTINE: ota-quarantine
+  S3_BUCKET_PUBLISHED: ota-published
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+  OTA_MAX_PACKAGE_BYTES: ${OTA_MAX_PACKAGE_BYTES:-8589934592}
 
 services:
   nginx:
@@ -35,15 +52,7 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.dashboard
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://ota:${POSTGRES_PASSWORD}@postgres:5432/ota
-      REDIS_URL: redis://redis:6379
-      S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-https://release.mod-syria.org/s3}
-      S3_BUCKET_QUARANTINE: ota-quarantine
-      S3_BUCKET_PUBLISHED: ota-published
-      OTA_PUBLIC_BASE_URL: ${OTA_PUBLIC_BASE_URL:-https://release.mod-syria.org/}
-      OTA_MAX_PACKAGE_BYTES: ${OTA_MAX_PACKAGE_BYTES:-8589934592}
+      <<: *app-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,14 +80,8 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.worker
     environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://ota:${POSTGRES_PASSWORD}@postgres:5432/ota
-      REDIS_URL: redis://redis:6379
-      S3_ENDPOINT: http://minio:9000
-      S3_BUCKET_QUARANTINE: ota-quarantine
-      S3_BUCKET_PUBLISHED: ota-published
+      <<: *app-env
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
-      OTA_MAX_PACKAGE_BYTES: ${OTA_MAX_PACKAGE_BYTES:-8589934592}
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,7 +168,7 @@ services:
         mc mb --ignore-existing "local/ota-published"
         mc anonymous set download "local/ota-published"
         printf '%s' '[{"AllowedOrigins":["http://localhost:3000","https://release.mod-syria.org"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]' > /tmp/cors.json
-        mc cors set /tmp/cors.json "local/ota-quarantine" || true
+        mc cors set local/ota-quarantine /tmp/cors.json || true
         echo "MinIO buckets ready."
     environment:
       MINIO_HOST: minio:9000

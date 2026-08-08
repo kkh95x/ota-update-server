@@ -12,6 +12,15 @@ import { formatBytes, isSuspiciouslySmallPackage } from "@/lib/format-bytes";
 import { releaseStatusHint } from "@/lib/release-status-hints";
 import { RELEASE_APPROVALS_REQUIRED } from "@/lib/release-approval";
 
+type ChannelPublication = {
+  id: string;
+  channelKey: string;
+  metadataObjectKey: string;
+  metadataUrl: string;
+  publishedAt: string;
+  publishedBy: { id: string; email: string; displayName: string | null } | null;
+};
+
 type ReleaseDetail = {
   id: string;
   versionLabel: string;
@@ -20,13 +29,23 @@ type ReleaseDetail = {
   postTimestamp: string | null;
   channelKey: string;
   status: string;
+  validationFailureReason?: string | null;
   changelog: string | null;
   codename: string;
   publicMetadataUrl?: string;
   publishedAt?: string | null;
-  packages: { id: string; packageType: string; originalFilename: string; byteSize: string }[];
+  channelPublications?: ChannelPublication[];
+  packages: {
+    id: string;
+    packageType: string;
+    originalFilename: string;
+    byteSize: string;
+    validationErrors?: string | null;
+  }[];
   approvals: { approverEmail: string; approverName: string | null; note: string | null; createdAt: string }[];
 };
+
+const PROMOTABLE_CHANNELS = ["testing", "alpha", "beta", "stable", "stable-security-preview"] as const;
 
 const FORM_ID = "approve-release-form";
 
@@ -40,6 +59,9 @@ export default function ReleaseDetailView() {
   const [approving, setApproving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
+  const [promoteTargets, setPromoteTargets] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   async function load() {
@@ -68,6 +90,14 @@ export default function ReleaseDetailView() {
     }, 2000);
     return () => clearInterval(timer);
   }, [publishing, release?.status, params.id]);
+
+  useEffect(() => {
+    if (!promoting || !release) return;
+    const timer = setInterval(() => {
+      load().catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [promoting, release?.channelPublications?.length, params.id]);
 
   useEffect(() => {
     if (publishing && release?.status === "PUBLISHED") {
@@ -114,6 +144,49 @@ export default function ReleaseDetailView() {
     } finally {
       setApproving(false);
     }
+  }
+
+  async function onPromote() {
+    if (promoteTargets.length === 0) {
+      setPromoteError("اختر قناة واحدة على الأقل");
+      return;
+    }
+    setPromoting(true);
+    setPromoteError(null);
+    try {
+      const res = await fetch(`/api/admin/releases/${params.id}/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelKeys: promoteTargets }),
+      });
+      const body = (await res.json()) as { error?: string; channels?: string[] };
+      if (!res.ok) {
+        if (body.error === "channel_already_published") {
+          setPromoteError(`قناة منشورة مسبقاً: ${body.channels?.join(", ") ?? ""}`);
+        } else if (body.error === "ota_paused_globally") {
+          setPromoteError("التحديثات متوقفة globally");
+        } else if (body.error === "release_not_published") {
+          setPromoteError("يجب نشر الإصدار على القناة الأولى أولاً");
+        } else {
+          setPromoteError("فشل طلب الترقية");
+        }
+        setPromoting(false);
+        return;
+      }
+      setToast(`جاري الترقية إلى: ${promoteTargets.join(", ")}…`);
+      setPromoteTargets([]);
+      await load();
+      setTimeout(() => setPromoting(false), 3000);
+    } catch {
+      setPromoteError("تعذر الاتصال بالخادم");
+      setPromoting(false);
+    }
+  }
+
+  function togglePromoteTarget(channel: string) {
+    setPromoteTargets((prev) =>
+      prev.includes(channel) ? prev.filter((c) => c !== channel) : [...prev, channel],
+    );
   }
 
   async function onPublish() {
@@ -176,6 +249,15 @@ export default function ReleaseDetailView() {
 
   const hasTinyPackage = release.packages.some((p) => isSuspiciouslySmallPackage(Number(p.byteSize)));
 
+  const publishedChannelKeys = new Set(
+    (release.channelPublications ?? []).map((p) => p.channelKey),
+  );
+  publishedChannelKeys.add(release.channelKey);
+
+  const availablePromoteChannels = PROMOTABLE_CHANNELS.filter((ch) => !publishedChannelKeys.has(ch));
+
+  const canPromote = release.status === "PUBLISHED" && availablePromoteChannels.length > 0;
+
   return (
     <div className="admin-page admin-page-wide">
       <AdminPageHeader
@@ -216,18 +298,79 @@ export default function ReleaseDetailView() {
 
       {publishError && <p className="error">{publishError}</p>}
 
-      {release.status === "PUBLISHED" && release.publicMetadataUrl && (
+      {release.status === "PUBLISHED" && (
         <div className="admin-panel publish-info">
-          <h2>منشور على الخادم</h2>
-          <p className="mono publish-url">
-            <span className="prompt">{">"}</span> metadata:{" "}
-            <a href={release.publicMetadataUrl} target="_blank" rel="noreferrer">
-              {release.publicMetadataUrl}
-            </a>
+          <h2>القنوات المنشورة</h2>
+          <ul className="admin-list">
+            {(release.channelPublications ?? []).length === 0 ? (
+              <li>
+                <code>{release.channelKey}</code>
+                {release.publicMetadataUrl && (
+                  <>
+                    {" — "}
+                    <a href={release.publicMetadataUrl} target="_blank" rel="noreferrer">
+                      metadata
+                    </a>
+                  </>
+                )}
+                {release.publishedAt && (
+                  <span className="muted"> ({new Date(release.publishedAt).toLocaleString("ar")})</span>
+                )}
+              </li>
+            ) : (
+              (release.channelPublications ?? []).map((pub) => (
+                <li key={pub.id}>
+                  <code>{pub.channelKey}</code>
+                  {" — "}
+                  <a href={pub.metadataUrl} target="_blank" rel="noreferrer" className="mono">
+                    {pub.metadataObjectKey}
+                  </a>
+                  <span className="muted"> · {new Date(pub.publishedAt).toLocaleString("ar")}</span>
+                  {pub.publishedBy && (
+                    <span className="muted"> · {pub.publishedBy.displayName ?? pub.publishedBy.email}</span>
+                  )}
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+
+      {canPromote && (
+        <div className="admin-panel" style={{ marginTop: "1rem" }}>
+          <h2>ترقية إلى قنوات أخرى</h2>
+          <p className="muted">
+            نفس ملف ZIP — يُحدَّث metadata فقط. المسار الموصى به: testing → alpha → beta → stable
           </p>
-          {release.publishedAt && (
-            <p className="muted">نُشر: {new Date(release.publishedAt).toLocaleString("ar")}</p>
-          )}
+          <div className="channel-pill-row" style={{ marginTop: "0.75rem" }}>
+            {availablePromoteChannels.map((ch) => (
+              <button
+                key={ch}
+                type="button"
+                className={`channel-pill${promoteTargets.includes(ch) ? " active" : ""}`}
+                onClick={() => togglePromoteTarget(ch)}
+                disabled={promoting}
+              >
+                {ch}
+              </button>
+            ))}
+          </div>
+          {promoteError && <p className="error">{promoteError}</p>}
+          <button
+            type="button"
+            className="btn"
+            style={{ marginTop: "0.75rem" }}
+            onClick={onPromote}
+            disabled={promoting || promoteTargets.length === 0}
+          >
+            {promoting ? (
+              <>
+                <span className="spinner" aria-hidden /> جاري الترقية…
+              </>
+            ) : (
+              `ترقية (${promoteTargets.length || 0})`
+            )}
+          </button>
         </div>
       )}
 
@@ -240,6 +383,12 @@ export default function ReleaseDetailView() {
       <p className="release-status-hint mono">
         <span className="prompt">{">"}</span> {releaseStatusHint(release.status)}
       </p>
+
+      {release.status === "QUARANTINED" && release.validationFailureReason && (
+        <div className="banner-danger mono">
+          <span className="prompt">{">"}</span> VALIDATION_FAILED — {release.validationFailureReason}
+        </div>
+      )}
 
       {hasTinyPackage && (
         <div className="banner-warn mono">
@@ -277,6 +426,7 @@ export default function ReleaseDetailView() {
                 <th>النوع</th>
                 <th>الملف</th>
                 <th>الحجم</th>
+                <th>التحقق</th>
               </tr>
             </thead>
             <tbody>
@@ -292,6 +442,13 @@ export default function ReleaseDetailView() {
                     <td>
                       {formatBytes(bytes)}
                       {tiny && <span className="pkg-size-warn mono"> (test)</span>}
+                    </td>
+                    <td>
+                      {p.validationErrors ? (
+                        <span className="validation-failure-reason">{p.validationErrors}</span>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                   </tr>
                 );

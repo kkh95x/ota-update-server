@@ -191,6 +191,24 @@ a {
   font-size: 0.85rem;
 }
 
+.banner-danger {
+  background: rgba(255, 51, 102, 0.1);
+  color: var(--danger, #ff3366);
+  border: 1px solid rgba(255, 51, 102, 0.35);
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.validation-failure-reason {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--danger, #ff3366);
+  max-width: 28rem;
+}
+
 .release-status-hint {
   margin: -0.5rem 0 1.25rem;
   font-size: 0.82rem;
@@ -461,6 +479,7 @@ label {
   color: var(--text);
   font-size: 0.78rem;
   line-height: 1.45;
+  white-space: pre-wrap;
   box-shadow: var(--glow-strong);
 }
 
@@ -745,6 +764,12 @@ textarea:focus {
   border: 1px solid var(--border);
   color: var(--accent);
   font-family: var(--font-mono), var(--font-mono-fallback);
+}
+
+.channel-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
 .table-link {
@@ -1340,6 +1365,33 @@ textarea:focus {
 .dialog-lg {
   min-width: min(100%, 26rem);
   max-width: min(calc(100vw - 3rem), 36rem);
+}
+
+.dialog-xl {
+  min-width: min(100%, 26rem);
+  max-width: min(calc(100vw - 3rem), 36rem);
+}
+
+@media (min-width: 1024px) {
+  .dialog-xl {
+    min-width: min(100%, 42rem);
+    max-width: min(calc(100vw - 4rem), 56rem);
+    max-height: min(92vh, 860px);
+  }
+
+  .dialog-xl .dialog-body,
+  .dialog-xl .dialog-header,
+  .dialog-xl .dialog-footer {
+    padding-inline: 2rem;
+  }
+
+  .dialog-xl .channel-picker {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .dialog-xl .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .dialog-header {

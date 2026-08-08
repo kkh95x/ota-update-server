@@ -15,7 +15,9 @@ type ReleaseRow = {
   versionLabel: string;
   incrementalBuild: string;
   channelKey: string;
+  channelKeys: string[];
   status: string;
+  validationFailureReason?: string | null;
   codename: string;
   packageCount: number;
   approvalCount: number;
@@ -25,9 +27,10 @@ type ReleaseRow = {
 type DeviceModel = { id: string; codename: string; displayName: string };
 
 const CHANNELS = [
-  { key: "stable", label: "Stable", desc: "الإنتاج" },
-  { key: "beta", label: "Beta", desc: "اختبار واسع" },
+  { key: "testing", label: "Testing", desc: "أول نشر / مختبر" },
   { key: "alpha", label: "Alpha", desc: "داخلي" },
+  { key: "beta", label: "Beta", desc: "اختبار واسع" },
+  { key: "stable", label: "Stable", desc: "الإنتاج" },
 ] as const;
 
 const FORM_ID = "create-release-form";
@@ -48,7 +51,7 @@ export default function ReleasesView() {
     buildId: "",
     incrementalBuild: "",
     postTimestamp: "",
-    channelKey: "stable",
+    channelKeys: ["testing"] as string[],
     changelog: "",
   });
 
@@ -79,7 +82,7 @@ export default function ReleasesView() {
       buildId: "",
       incrementalBuild: "",
       postTimestamp: "",
-      channelKey: "stable",
+      channelKeys: ["testing"],
       changelog: "",
     });
     setFormError(null);
@@ -92,8 +95,22 @@ export default function ReleasesView() {
     setFormError(null);
   }
 
+  function toggleChannelKey(key: string) {
+    setForm((prev) => {
+      const selected = prev.channelKeys.includes(key)
+        ? prev.channelKeys.filter((k) => k !== key)
+        : [...prev.channelKeys, key];
+      if (selected.length === 0) return prev;
+      return { ...prev, channelKeys: selected };
+    });
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (form.channelKeys.length === 0) {
+      setFormError("اختر قناة واحدة على الأقل");
+      return;
+    }
     setSaving(true);
     setFormError(null);
     try {
@@ -196,10 +213,19 @@ export default function ReleasesView() {
                       <span className="muted">{r.incrementalBuild}</span>
                     </td>
                     <td>
-                      <span className="channel-tag">{r.channelKey}</span>
+                      <div className="channel-tags">
+                        {(r.channelKeys ?? [r.channelKey]).map((ch) => (
+                          <span key={ch} className="channel-tag">
+                            {ch}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td>
                       <StatusBadge status={r.status} />
+                      {r.status === "QUARANTINED" && r.validationFailureReason && (
+                        <p className="validation-failure-reason">{r.validationFailureReason}</p>
+                      )}
                     </td>
                     <td>{r.packageCount}</td>
                     <td>{r.approvalCount}/{RELEASE_APPROVALS_REQUIRED}</td>
@@ -221,13 +247,13 @@ export default function ReleasesView() {
         onClose={closeDialog}
         title="إصدار جديد"
         description="مسودة — يمكن رفع الحزمة والموافقة لاحقاً"
-        size="lg"
+        size="xl"
         footer={
           <DialogActions
             onCancel={closeDialog}
             submitLabel="إنشاء مسودة"
             loading={saving}
-            disabled={!form.deviceModelId}
+            disabled={!form.deviceModelId || form.channelKeys.length === 0}
             submitForm={FORM_ID}
           />
         }
@@ -260,14 +286,18 @@ export default function ReleasesView() {
                 <button
                   key={ch.key}
                   type="button"
-                  className={`channel-pill${form.channelKey === ch.key ? " active" : ""}`}
-                  onClick={() => setForm({ ...form, channelKey: ch.key })}
+                  className={`channel-pill${form.channelKeys.includes(ch.key) ? " active" : ""}`}
+                  onClick={() => toggleChannelKey(ch.key)}
+                  aria-pressed={form.channelKeys.includes(ch.key)}
                 >
                   <span>{ch.label}</span>
                   <small>{ch.desc}</small>
                 </button>
               ))}
             </div>
+            <p className="muted form-hint">
+              اختر قناة واحدة أو أكثر — الأولى (testing → stable) تُستخدم كقناة المنشأ عند النشر.
+            </p>
           </FormField>
 
           <div className="form-grid">

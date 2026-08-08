@@ -4,7 +4,7 @@ import { loadEnv } from "@custom-os-ota/configuration";
 import { checkDatabaseHealth } from "@custom-os-ota/database";
 import { createLogger } from "@custom-os-ota/observability";
 import { startValidationWorker } from "./validation.js";
-import { startPublishWorker } from "./publish.js";
+import { startPublishWorker, startPromoteWorker } from "./publish.js";
 
 const log = createLogger("worker");
 
@@ -14,6 +14,7 @@ async function main() {
 
   const validationWorker = startValidationWorker(connection, env.WORKER_CONCURRENCY);
   const publishWorker = startPublishWorker(connection, env.WORKER_CONCURRENCY);
+  const promoteWorker = startPromoteWorker(connection, env.WORKER_CONCURRENCY);
 
   const metricsServer = createServer(async (req, res) => {
     if (req.url === "/health/live") {
@@ -49,6 +50,7 @@ async function main() {
     log.info("worker.shutdown", { event: "worker.shutdown" });
     await validationWorker.close();
     await publishWorker.close();
+    await promoteWorker.close();
     await connection.quit();
     metricsServer.close();
     process.exit(0);

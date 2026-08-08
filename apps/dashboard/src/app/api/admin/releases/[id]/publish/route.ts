@@ -50,7 +50,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const { clientIp, forwardedFor } = extractClientIp(request.headers);
 
-  await enqueuePublishJob({ releaseId: release.id });
+  await enqueuePublishJob({ releaseId: release.id, publishedById: auth.session.userId });
 
   await writeAudit({
     actorId: auth.session.userId,
