@@ -61,7 +61,13 @@ services:
       minio-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health/live"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -137,7 +143,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
-      # Support multi-GB OTA objects (default is sufficient; explicit for ops clarity)
+      # Browser presigned uploads (same origin via nginx /s3/); global CORS for community MinIO
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-https://release.mod-syria.org,http://localhost:3000}
       MINIO_API_REQUESTS_MAX: ${MINIO_API_REQUESTS_MAX:-10000}
     volumes:
       - minio_data:/data
@@ -167,8 +174,6 @@ services:
         mc mb --ignore-existing "local/ota-quarantine"
         mc mb --ignore-existing "local/ota-published"
         mc anonymous set download "local/ota-published"
-        printf '%s' '[{"AllowedOrigins":["http://localhost:3000","https://release.mod-syria.org"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]' > /tmp/cors.json
-        mc cors set local/ota-quarantine /tmp/cors.json || true
         echo "MinIO buckets ready."
     environment:
       MINIO_HOST: minio:9000
