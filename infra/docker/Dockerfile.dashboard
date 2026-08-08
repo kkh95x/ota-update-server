@@ -37,6 +37,8 @@ RUN pnpm --filter "@custom-os-ota/dashboard..." run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 RUN addgroup -S ota && adduser -S ota -G ota
 COPY --from=builder /app/apps/dashboard/.next/standalone ./
 COPY --from=builder /app/apps/dashboard/.next/static ./apps/dashboard/.next/static

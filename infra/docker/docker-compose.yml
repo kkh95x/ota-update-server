@@ -57,6 +57,8 @@ services:
       dockerfile: infra/docker/Dockerfile.dashboard
     environment:
       <<: *app-env
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
     depends_on:
       postgres:
         condition: service_healthy
