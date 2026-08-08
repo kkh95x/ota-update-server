@@ -1,0 +1,19 @@
+# HTTPS overlay — use ONLY after Let's Encrypt certificates exist on the VPS.
+#
+#   cd infra/docker
+#   bash setup-ssl.sh          # first time: obtain certs
+#   docker compose -f docker-compose.yml -f docker-compose.ssl.yml up -d nginx
+#
+# Cert paths on the host (default):
+#   /etc/letsencrypt/live/release.mod-syria.org/fullchain.pem
+#   /etc/letsencrypt/live/release.mod-syria.org/privkey.pem
+#
+# Custom cert folder (must contain fullchain.pem + privkey.pem):
+#   set SSL_CERT_DIR=/var/www/ota-server/certs in .env
+#   and use docker-compose.ssl-custom.yml instead.
+
+services:
+  nginx:
+    volumes:
+      - ../nginx/nginx.ssl-server.conf:/etc/nginx/conf.d/ssl-server.conf:ro
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro

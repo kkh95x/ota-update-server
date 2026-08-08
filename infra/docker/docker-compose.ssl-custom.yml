@@ -1,0 +1,11 @@
+# Custom certificate directory (not Let's Encrypt layout).
+# .env: SSL_CERT_DIR=/var/www/ota-server/certs
+# Files required: $SSL_CERT_DIR/fullchain.pem and $SSL_CERT_DIR/privkey.pem
+#
+# Use nginx.ssl-server.custom.conf which reads /etc/nginx/ssl/*.pem
+
+services:
+  nginx:
+    volumes:
+      - ../nginx/nginx.ssl-server.custom.conf:/etc/nginx/conf.d/ssl-server.conf:ro
+      - ${SSL_CERT_DIR:?set SSL_CERT_DIR to your VPS cert folder}:/etc/nginx/ssl:ro
