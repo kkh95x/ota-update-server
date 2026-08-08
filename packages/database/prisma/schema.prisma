@@ -1,0 +1,440 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Admin & auth ---
+
+enum AdminRoleName {
+  VIEWER
+  SUPPORT
+  RELEASE_UPLOADER
+  RELEASE_REVIEWER
+  RELEASE_PUBLISHER
+  SECURITY_ADMIN
+  SUPER_ADMIN
+}
+
+model AdminUser {
+  id               String        @id @default(cuid())
+  email            String        @unique
+  passwordHash     String
+  displayName      String?
+  mfaEnabled       Boolean       @default(false)
+  mfaSecret        String?
+  isActive         Boolean       @default(true)
+  failedLoginCount Int           @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  sessions         AdminSession[]
+  roles            AdminRole[]
+  auditLogs        AuditLog[]    @relation("AuditActor")
+  uploads          UploadSession[]
+  approvals        ReleaseApproval[]
+}
+
+model AdminSession {
+  id           String    @id @default(cuid())
+  userId       String
+  user         AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  idleExpiresAt DateTime?
+  revokedAt    DateTime?
+  clientIp     String?
+  forwardedFor String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+}
+
+model Role {
+  id          String       @id @default(cuid())
+  name        AdminRoleName @unique
+  description String?
+  permissions Permission[]
+  admins      AdminRole[]
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  code        String @unique
+  description String?
+  roles       Role[]
+}
+
+model AdminRole {
+  userId String
+  roleId String
+  user   AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@id([userId, roleId])
+}
+
+// --- Devices ---
+
+model DeviceModel {
+  id          String   @id @default(cuid())
+  codename    String   @unique
+  displayName String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  releases    Release[]
+  installations DeviceInstallation[]
+  snapshots   ChannelSnapshot[]
+}
+
+model DeviceGroup {
+  id                  String   @id @default(cuid())
+  name                String
+  internalChannelSlug String   @unique
+  description         String?
+  adminNote           String?
+  updatesPaused       Boolean  @default(false)
+  pauseReason         String?
+  pausedAt            DateTime?
+  pausedById          String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  members             DeviceGroupMember[]
+  rolloutStages       RolloutStage[]
+}
+
+model DeviceInstallation {
+  id               String   @id @default(cuid())
+  installationId   String   @unique @default(uuid())
+  deviceModelId    String
+  deviceModel      DeviceModel @relation(fields: [deviceModelId], references: [id])
+  ownerLabel       String?
+  adminNote        String?
+  currentBuildId   String?
+  currentIncremental String?
+  currentChannel   String?
+  lastSeenAt       DateTime?
+  firstSeenAt      DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  groups           DeviceGroupMember[]
+  updateChecks     UpdateCheck[]
+  installationEvents InstallationEvent[]
+}
+
+model DeviceGroupMember {
+  installationId String
+  groupId        String
+  installation   DeviceInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  group          DeviceGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  addedAt        DateTime @default(now())
+  @@id([installationId, groupId])
+}
+
+// --- Releases ---
+
+enum ReleaseStatus {
+  DRAFT
+  QUARANTINED
+  VALIDATING
+  VALIDATED
+  PENDING_APPROVAL
+  APPROVED
+  PUBLISHED
+  PAUSED
+  REVOKED
+}
+
+enum OtaPackageType {
+  FULL
+  INCREMENTAL
+}
+
+enum ValidationStatus {
+  PENDING
+  RUNNING
+  PASSED
+  FAILED
+}
+
+model Release {
+  id                 String        @id @default(cuid())
+  deviceModelId      String
+  deviceModel        DeviceModel   @relation(fields: [deviceModelId], references: [id])
+  versionLabel       String
+  buildId            String
+  incrementalBuild   String
+  postTimestamp      String?
+  buildFingerprint   String?
+  androidVersion     String?
+  securityPatchLevel String?
+  channelKey         String
+  status             ReleaseStatus @default(DRAFT)
+  changelog          String?
+  minSourceIncremental String?
+  rollbackIndex      Int?
+  createdAt          DateTime      @default(now())
+  validatedAt        DateTime?
+  approvedAt         DateTime?
+  publishedAt        DateTime?
+  pausedAt           DateTime?
+  revokedAt          DateTime?
+  packages           OtaPackage[]
+  approvals          ReleaseApproval[]
+  revocations        ReleaseRevocation[]
+  rollouts           Rollout[]
+  @@unique([deviceModelId, channelKey, incrementalBuild])
+}
+
+model OtaPackage {
+  id                   String         @id @default(cuid())
+  releaseId            String
+  release              Release        @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  packageType          OtaPackageType
+  sourceIncremental    String?
+  sourceBuildId        String?
+  targetIncremental    String
+  objectKey            String
+  originalFilename     String
+  byteSize             BigInt
+  sha256               String?
+  signatureValid       Boolean?
+  validationReport     Json?
+  uploadedById         String?
+  createdAt            DateTime       @default(now())
+  @@unique([releaseId, packageType, sourceIncremental])
+}
+
+model ReleaseApproval {
+  id         String    @id @default(cuid())
+  releaseId  String
+  release    Release   @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  approverId String
+  approver   AdminUser @relation(fields: [approverId], references: [id])
+  note       String?
+  createdAt  DateTime  @default(now())
+}
+
+model ReleaseRevocation {
+  id        String   @id @default(cuid())
+  releaseId String
+  release   Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  reason    String
+  revokedBy String
+  createdAt DateTime @default(now())
+}
+
+model ReleaseChannel {
+  id            String   @id @default(cuid())
+  deviceModelId String
+  channelKey    String
+  paused        Boolean  @default(false)
+  pauseReason   String?
+  updatedAt     DateTime @updatedAt
+  @@unique([deviceModelId, channelKey])
+}
+
+model ChannelSnapshot {
+  id            String      @id @default(cuid())
+  deviceModelId String
+  deviceModel   DeviceModel @relation(fields: [deviceModelId], references: [id])
+  channelKey    String
+  metadataBody  String
+  objectKey     String?
+  createdAt     DateTime    @default(now())
+  @@index([deviceModelId, channelKey, createdAt])
+}
+
+// --- Rollouts ---
+
+enum RolloutTargetMode {
+  SELECTED_GROUPS
+  ALL_GROUPS
+  CHANNELS_ONLY
+}
+
+enum RolloutStageStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  PAUSED
+  SKIPPED
+}
+
+model Rollout {
+  id          String            @id @default(cuid())
+  releaseId   String
+  release     Release           @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  targetMode  RolloutTargetMode
+  note        String?
+  createdAt   DateTime          @default(now())
+  stages      RolloutStage[]
+  rules       RolloutRule[]
+}
+
+model RolloutStage {
+  id        String             @id @default(cuid())
+  rolloutId String
+  rollout   Rollout            @relation(fields: [rolloutId], references: [id], onDelete: Cascade)
+  order     Int
+  groupId   String?
+  group     DeviceGroup?       @relation(fields: [groupId], references: [id])
+  channelKey String?
+  status    RolloutStageStatus @default(PENDING)
+  stageNote String?
+  startedAt DateTime?
+  completedAt DateTime?
+  @@unique([rolloutId, order])
+}
+
+model RolloutRule {
+  id        String  @id @default(cuid())
+  rolloutId String
+  rollout   Rollout @relation(fields: [rolloutId], references: [id], onDelete: Cascade)
+  ruleKey   String
+  ruleValue String
+}
+
+// --- Upload & validation ---
+
+enum UploadStatus {
+  CREATED
+  UPLOADING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model UploadSession {
+  id           String       @id @default(cuid())
+  uploadedById String
+  uploadedBy   AdminUser    @relation(fields: [uploadedById], references: [id])
+  objectKey    String
+  expectedSize BigInt?
+  status       UploadStatus @default(CREATED)
+  expiresAt    DateTime
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  validationJobs ValidationJob[]
+}
+
+model ValidationJob {
+  id              String           @id @default(cuid())
+  uploadSessionId String
+  uploadSession   UploadSession    @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade)
+  status          ValidationStatus @default(PENDING)
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  result          ValidationResult?
+}
+
+model ValidationResult {
+  id            String        @id @default(cuid())
+  jobId         String        @unique
+  job           ValidationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  passed        Boolean
+  reportJson    Json
+  reportSummary String?
+  createdAt     DateTime      @default(now())
+}
+
+// --- Telemetry (opt-in) ---
+
+model UpdateCheck {
+  id             String             @id @default(cuid())
+  installationId String?
+  installation   DeviceInstallation? @relation(fields: [installationId], references: [id])
+  deviceCodename String
+  channelKey     String
+  clientIp       String?
+  forwardedFor   String?
+  result         String
+  createdAt      DateTime           @default(now())
+  @@index([createdAt])
+}
+
+model InstallationEvent {
+  id             String             @id @default(cuid())
+  installationId String
+  installation   DeviceInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  eventType      String
+  detail         Json?
+  createdAt      DateTime           @default(now())
+}
+
+// --- Audit, security, logs ---
+
+model AuditLog {
+  id            String     @id @default(cuid())
+  actorId       String?
+  actor         AdminUser? @relation("AuditActor", fields: [actorId], references: [id])
+  action        String
+  targetType    String?
+  targetId      String?
+  metadata      Json?
+  correlationId String?
+  clientIp      String?
+  forwardedFor  String?
+  result        String
+  reason        String?
+  createdAt     DateTime   @default(now())
+  @@index([createdAt])
+  @@index([action])
+}
+
+model SecurityEvent {
+  id            String   @id @default(cuid())
+  severity      String
+  eventType     String
+  detail        Json?
+  clientIp      String?
+  forwardedFor  String?
+  correlationId String?
+  createdAt     DateTime @default(now())
+  @@index([createdAt])
+}
+
+model AccessLog {
+  id            String   @id @default(cuid())
+  service       String
+  event         String
+  method        String?
+  path          String?
+  statusCode    Int?
+  clientIp      String?
+  forwardedFor  String?
+  correlationId String?
+  byteSize      BigInt?
+  durationMs    Int?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  @@index([createdAt])
+  @@index([clientIp])
+  @@index([event])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+model ApiCredential {
+  id        String   @id @default(cuid())
+  name      String
+  keyHash   String   @unique
+  scopes    String[]
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+}
+
+model RetentionPolicy {
+  id            String @id @default(cuid())
+  logType       String @unique
+  retentionDays Int
+}

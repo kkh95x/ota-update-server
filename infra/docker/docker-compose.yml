@@ -1,0 +1,182 @@
+# CUSTOM_OS OTA — production stack (Docker Compose, self-hosted MinIO)
+# Usage: cp .env.example .env && docker compose up -d
+
+name: custom-os-ota
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      dashboard:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 1G
+
+  dashboard:
+    image: ${DASHBOARD_IMAGE:-custom-os-ota/dashboard:latest}
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.dashboard
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ota:${POSTGRES_PASSWORD}@postgres:5432/ota
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-https://release.mod-syria.org/s3}
+      S3_BUCKET_QUARANTINE: ota-quarantine
+      S3_BUCKET_PUBLISHED: ota-published
+      OTA_PUBLIC_BASE_URL: ${OTA_PUBLIC_BASE_URL:-https://release.mod-syria.org/}
+      OTA_MAX_PACKAGE_BYTES: ${OTA_MAX_PACKAGE_BYTES:-8589934592}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      replicas: ${DASHBOARD_REPLICAS:-1}
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+
+  worker:
+    image: ${WORKER_IMAGE:-custom-os-ota/worker:latest}
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ota:${POSTGRES_PASSWORD}@postgres:5432/ota
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET_QUARANTINE: ota-quarantine
+      S3_BUCKET_PUBLISHED: ota-published
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      OTA_MAX_PACKAGE_BYTES: ${OTA_MAX_PACKAGE_BYTES:-8589934592}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ota
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ota
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ota -d ota"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    # Pinned by digest (pull with: docker pull minio/minio@sha256:...)
+    image: ${MINIO_IMAGE:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      # Support multi-GB OTA objects (default is sufficient; explicit for ops clarity)
+      MINIO_API_REQUESTS_MAX: ${MINIO_API_REQUESTS_MAX:-10000}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+
+  minio-init:
+    image: ${MINIO_MC_IMAGE:-minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "Waiting for MinIO at $${MINIO_HOST}..."
+        until mc alias set local "http://$${MINIO_HOST}" "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" 2>/dev/null; do
+          sleep 2
+        done
+        mc mb --ignore-existing "local/ota-quarantine"
+        mc mb --ignore-existing "local/ota-published"
+        mc anonymous set download "local/ota-published"
+        printf '%s' '[{"AllowedOrigins":["http://localhost:3000","https://release.mod-syria.org"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]' > /tmp/cors.json
+        mc cors set /tmp/cors.json "local/ota-quarantine" || true
+        echo "MinIO buckets ready."
+    environment:
+      MINIO_HOST: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    depends_on:
+      minio:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

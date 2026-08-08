@@ -1,0 +1,27 @@
+{
+  "name": "@custom-os-ota/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@custom-os-ota/audit": "workspace:*",
+    "@custom-os-ota/database": "workspace:*",
+    "@node-rs/argon2": "^2.0.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

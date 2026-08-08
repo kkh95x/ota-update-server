@@ -1,0 +1,30 @@
+{
+  "name": "custom-os-ota",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "node scripts/with-root-env.mjs npx turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
+    "install:deps": "node scripts/run-pnpm.mjs install",
+    "db:generate": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:generate",
+    "db:migrate": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:migrate",
+    "db:push": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:push",
+    "db:seed": "node scripts/run-pnpm.mjs --filter @custom-os-ota/database db:seed",
+    "create-admin": "node scripts/with-root-env.mjs tsx scripts/create-admin.ts",
+    "generate-env": "node -e \"process.platform==='win32'?require('child_process').execSync('powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-env.ps1',{stdio:'inherit'}):require('child_process').execSync('bash scripts/generate-env.sh',{stdio:'inherit'})\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "dotenv": "^16.4.7",
+    "pnpm": "9.15.4",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}
