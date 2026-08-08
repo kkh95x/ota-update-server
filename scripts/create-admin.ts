@@ -4,9 +4,17 @@ import { loadEnv } from "@custom-os-ota/configuration";
 
 async function main() {
   loadEnv();
-  const [email, password, displayName] = process.argv.slice(2);
+  // pnpm/npm pass a literal "--" as the first arg after the script path
+  const args = process.argv.slice(2).filter((arg) => arg !== "--");
+  const [email, password, displayName] = args;
   if (!email || !password) {
-    console.error("Usage: tsx scripts/create-admin.ts <email> <password> [displayName]");
+    console.error("Usage: pnpm create-admin -- <email> <password> [displayName]");
+    process.exit(1);
+  }
+
+  if (!email.includes("@")) {
+    console.error(`Invalid email "${email}". Did pnpm pass "--" as the address?`);
+    console.error("Try: pnpm create-admin -- admin@example.com 'your-password'");
     process.exit(1);
   }
 
