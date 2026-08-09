@@ -23,6 +23,9 @@ function s3ClientOptions(endpoint: string, forcePathStyle: boolean) {
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
     },
     forcePathStyle,
+    // Default SDK checksums break browser presigned PUT (CRC32 hoisted to query string).
+    requestChecksumCalculation: "WHEN_REQUIRED" as const,
+    responseChecksumValidation: "WHEN_REQUIRED" as const,
   };
 }
 
