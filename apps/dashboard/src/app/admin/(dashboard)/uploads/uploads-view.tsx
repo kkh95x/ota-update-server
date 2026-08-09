@@ -163,6 +163,8 @@ export default function UploadsView() {
     } catch (err) {
       if (err instanceof Error && err.message === "upload_failed_413") {
         setError("حجم الملف أكبر من حد nginx — حدّث ota-locations.conf (client_max_body_size على /s3/)");
+      } else if (err instanceof Error && err.message === "upload_failed_400") {
+        setError("فشل رفع الملف (400) — توقيع الرابط غير صالح؛ أعد بناء dashboard بعد تحديث object-storage");
       } else if (err instanceof Error && err.message.startsWith("upload_failed_")) {
         const code = err.message.replace("upload_failed_", "");
         setError(`فشل رفع الملف (HTTP ${code}) — تحقق من S3_PUBLIC_ENDPOINT و CORS`);

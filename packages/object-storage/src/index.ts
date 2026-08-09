@@ -37,8 +37,32 @@ export function getS3Client(): S3Client {
 export function getPublicS3Client(): S3Client {
   if (publicClient) return publicClient;
   const env = loadEnv();
-  publicClient = new S3Client(s3ClientOptions(env.S3_PUBLIC_ENDPOINT, env.S3_FORCE_PATH_STYLE));
+  const { signingEndpoint } = resolvePublicS3Endpoint(env.S3_PUBLIC_ENDPOINT);
+  publicClient = new S3Client(s3ClientOptions(signingEndpoint, env.S3_FORCE_PATH_STYLE));
   return publicClient;
+}
+
+/**
+ * nginx serves MinIO under /s3/ but strips that prefix before proxying.
+ * SigV4 must be computed for the path MinIO sees (/bucket/key), then /s3 is
+ * inserted into the browser URL only.
+ */
+function resolvePublicS3Endpoint(publicEndpoint: string): {
+  signingEndpoint: string;
+  nginxPathPrefix: string;
+} {
+  const url = new URL(publicEndpoint);
+  if (url.pathname === "/s3" || url.pathname === "/s3/") {
+    return { signingEndpoint: url.origin, nginxPathPrefix: "/s3" };
+  }
+  return { signingEndpoint: publicEndpoint.replace(/\/$/, ""), nginxPathPrefix: "" };
+}
+
+function browserPresignedUrl(signedUrl: string, nginxPathPrefix: string): string {
+  if (!nginxPathPrefix) return signedUrl;
+  const parsed = new URL(signedUrl);
+  parsed.pathname = `${nginxPathPrefix}${parsed.pathname}`;
+  return parsed.toString();
 }
 
 export async function checkStorageHealth(): Promise<boolean> {
@@ -59,13 +83,16 @@ export async function presignPutObject(params: {
   contentType?: string;
   expiresInSeconds?: number;
 }): Promise<string> {
-  const s3 = getPublicS3Client();
+  const env = loadEnv();
+  const { signingEndpoint, nginxPathPrefix } = resolvePublicS3Endpoint(env.S3_PUBLIC_ENDPOINT);
+  const s3 = new S3Client(s3ClientOptions(signingEndpoint, env.S3_FORCE_PATH_STYLE));
   const command = new PutObjectCommand({
     Bucket: params.bucket,
     Key: params.objectKey,
     ContentType: params.contentType ?? "application/zip",
   });
-  return getSignedUrl(s3, command, { expiresIn: params.expiresInSeconds ?? 3600 });
+  const signed = await getSignedUrl(s3, command, { expiresIn: params.expiresInSeconds ?? 3600 });
+  return browserPresignedUrl(signed, nginxPathPrefix);
 }
 
 export async function headObject(bucket: string, objectKey: string): Promise<{ size: bigint } | null> {
