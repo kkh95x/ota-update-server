@@ -57,9 +57,14 @@ export {
   type ParsedChannelMetadata,
 } from "./updater-client.js";
 export {
+  BASE_OTA_CHANNELS,
+  expandWithSecurityPreviewOverlays,
   isValidOtaChannelKey,
+  PROMOTABLE_OTA_CHANNELS,
   RECOMMENDED_CHANNEL_ORDER,
+  securityPreviewOverlayKey,
   sortOtaChannelKeys,
   STANDARD_OTA_CHANNELS,
+  type BaseOtaChannel,
   type StandardOtaChannel,
 } from "./channel-keys.js";

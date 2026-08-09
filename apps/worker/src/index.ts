@@ -3,6 +3,7 @@ import { Redis } from "ioredis";
 import { loadEnv } from "@custom-os-ota/configuration";
 import { checkDatabaseHealth } from "@custom-os-ota/database";
 import { createLogger } from "@custom-os-ota/observability";
+import { backfillAllSecurityPreviewOverlays } from "./channel-publish.js";
 import { startValidationWorker } from "./validation.js";
 import { startPublishWorker, startPromoteWorker } from "./publish.js";
 
@@ -15,6 +16,15 @@ async function main() {
   const validationWorker = startValidationWorker(connection, env.WORKER_CONCURRENCY);
   const publishWorker = startPublishWorker(connection, env.WORKER_CONCURRENCY);
   const promoteWorker = startPromoteWorker(connection, env.WORKER_CONCURRENCY);
+
+  const overlayBackfillCount = await backfillAllSecurityPreviewOverlays();
+  if (overlayBackfillCount > 0) {
+    log.info("security_preview.backfill.completed", {
+      event: "security_preview.backfill.completed",
+      metadata: { createdCount: overlayBackfillCount },
+      result: "success",
+    });
+  }
 
   const metricsServer = createServer(async (req, res) => {
     if (req.url === "/health/live") {

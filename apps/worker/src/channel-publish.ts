@@ -1,5 +1,5 @@
 import { loadEnv } from "@custom-os-ota/configuration";
-import { prisma } from "@custom-os-ota/database";
+import { prisma, ReleaseStatus } from "@custom-os-ota/database";
 import {
   copyObject,
   getTextObject,
@@ -11,6 +11,7 @@ import {
   publishedMetadataKey,
   publicArtifactUrl,
   resolvePublishedPackageKey,
+  securityPreviewOverlayKey,
   sortOtaChannelKeys,
 } from "@custom-os-ota/ota-protocol";
 import type { Release, DeviceModel, OtaPackage } from "@custom-os-ota/database";
@@ -86,6 +87,7 @@ export async function publishChannelMetadata(params: {
     where: { releaseId_channelKey: { releaseId: release.id, channelKey } },
   });
   if (existingPublication) {
+    await publishSecurityPreviewOverlayIfNeeded({ release, baseChannelKey: channelKey, publishedById });
     return {
       metadataKey,
       metadataUrl: publicArtifactUrl(env.OTA_PUBLIC_BASE_URL, metadataKey),
@@ -127,9 +129,70 @@ export async function publishChannelMetadata(params: {
     },
   });
 
-  return {
+  const result = {
     metadataKey,
     metadataUrl: publicArtifactUrl(env.OTA_PUBLIC_BASE_URL, metadataKey),
     created: true,
   };
+
+  await publishSecurityPreviewOverlayIfNeeded({ release, baseChannelKey: channelKey, publishedById });
+
+  return result;
+}
+
+async function publishSecurityPreviewOverlayIfNeeded(params: {
+  release: ReleaseWithPackages;
+  baseChannelKey: string;
+  publishedById?: string | null;
+}): Promise<void> {
+  const overlayKey = securityPreviewOverlayKey(params.baseChannelKey);
+  if (!overlayKey) return;
+
+  await publishChannelMetadata({
+    release: params.release,
+    channelKey: overlayKey,
+    publishedById: params.publishedById,
+  });
+}
+
+/** Create missing `{base}-security-preview` metadata for all base channels on a release. */
+export async function ensureSecurityPreviewOverlaysForRelease(
+  release: ReleaseWithPackages,
+  publishedById?: string | null,
+): Promise<string[]> {
+  const publications = await prisma.releaseChannelPublication.findMany({
+    where: { releaseId: release.id },
+    select: { channelKey: true },
+  });
+
+  const created: string[] = [];
+  for (const { channelKey } of publications) {
+    const overlayKey = securityPreviewOverlayKey(channelKey);
+    if (!overlayKey) continue;
+
+    const result = await publishChannelMetadata({
+      release,
+      channelKey: overlayKey,
+      publishedById,
+    });
+    if (result.created) created.push(overlayKey);
+  }
+
+  return created;
+}
+
+export async function backfillAllSecurityPreviewOverlays(): Promise<number> {
+  const releases = (await prisma.release.findMany({
+    where: { status: ReleaseStatus.PUBLISHED },
+    include: { deviceModel: true, packages: true },
+  })) as ReleaseWithPackages[];
+
+  let totalCreated = 0;
+  for (const release of releases) {
+    if (release.packages.length === 0 || !release.postTimestamp) continue;
+    const created = await ensureSecurityPreviewOverlaysForRelease(release);
+    totalCreated += created.length;
+  }
+
+  return totalCreated;
 }

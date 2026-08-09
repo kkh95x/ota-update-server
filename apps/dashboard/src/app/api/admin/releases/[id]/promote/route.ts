@@ -4,7 +4,7 @@ import { loadEnv } from "@custom-os-ota/configuration";
 import { prisma, ReleaseStatus } from "@custom-os-ota/database";
 import { writeAudit } from "@custom-os-ota/audit";
 import { extractClientIp } from "@custom-os-ota/observability";
-import { isValidOtaChannelKey } from "@custom-os-ota/ota-protocol";
+import { expandWithSecurityPreviewOverlays, isValidOtaChannelKey } from "@custom-os-ota/ota-protocol";
 import { requireAdminApi, isAuthFailure } from "@/lib/api-auth";
 import { enqueuePromoteJob } from "@/lib/queue";
 
@@ -29,7 +29,7 @@ export async function POST(request: Request, { params }: Params) {
     return NextResponse.json({ error: "invalid_request", details: body.error.flatten() }, { status: 400 });
   }
 
-  const uniqueKeys = [...new Set(body.data.channelKeys)];
+  const uniqueKeys = expandWithSecurityPreviewOverlays([...new Set(body.data.channelKeys)]);
   for (const channelKey of uniqueKeys) {
     if (!isValidOtaChannelKey(channelKey)) {
       return NextResponse.json({ error: "invalid_channel", channelKey }, { status: 400 });

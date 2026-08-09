@@ -2,7 +2,7 @@ import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import { loadEnv } from "@custom-os-ota/configuration";
 import { prisma, ReleaseStatus } from "@custom-os-ota/database";
-import { isValidOtaChannelKey, publicArtifactUrl, publishedMetadataKey } from "@custom-os-ota/ota-protocol";
+import { isValidOtaChannelKey, expandWithSecurityPreviewOverlays, publicArtifactUrl, publishedMetadataKey } from "@custom-os-ota/ota-protocol";
 import { createLogger } from "@custom-os-ota/observability";
 import {
   ensurePublishedPackages,
@@ -167,7 +167,7 @@ export async function processPromote(payload: PromoteJobPayload): Promise<{ ok: 
     return { ok: false, summary: "no packages attached" };
   }
 
-  const uniqueKeys = [...new Set(payload.channelKeys)];
+  const uniqueKeys = expandWithSecurityPreviewOverlays([...new Set(payload.channelKeys)]);
   for (const channelKey of uniqueKeys) {
     if (!isValidOtaChannelKey(channelKey)) {
       return { ok: false, summary: `invalid channel: ${channelKey}` };

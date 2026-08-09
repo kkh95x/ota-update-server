@@ -35,6 +35,28 @@ export function isValidOtaChannelKey(channelKey: string): boolean {
 /** Recommended promotion order for UI hints (not enforced). */
 export const RECOMMENDED_CHANNEL_ORDER = [...STANDARD_OTA_CHANNELS] as const;
 
+/** Channels shown in promote UI; security-preview overlays are created automatically. */
+export const PROMOTABLE_OTA_CHANNELS = [...BASE_OTA_CHANNELS] as const;
+
+/** Returns `{base}-security-preview` when `channelKey` is a base channel. */
+export function securityPreviewOverlayKey(channelKey: string): string | null {
+  if ((BASE_OTA_CHANNELS as readonly string[]).includes(channelKey)) {
+    return `${channelKey}-security-preview`;
+  }
+  return null;
+}
+
+/** When promoting `beta`, also queue `beta-security-preview` (deduped, sorted). */
+export function expandWithSecurityPreviewOverlays(channelKeys: string[]): string[] {
+  const expanded = new Set<string>();
+  for (const key of channelKeys) {
+    expanded.add(key);
+    const overlay = securityPreviewOverlayKey(key);
+    if (overlay) expanded.add(overlay);
+  }
+  return sortOtaChannelKeys([...expanded]);
+}
+
 /** Dedupe and sort channel keys by recommended rollout order; unknown keys trail. */
 export function sortOtaChannelKeys(channelKeys: string[]): string[] {
   const unique = [...new Set(channelKeys)];

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  expandWithSecurityPreviewOverlays,
   formatChannelMetadata,
   isValidOtaChannelKey,
   parseChannelMetadata,
   publishedMetadataKey,
+  securityPreviewOverlayKey,
   sortOtaChannelKeys,
 } from "./index.js";
 
@@ -49,6 +51,17 @@ describe("channel promotion metadata", () => {
   it("publishedMetadataKey for security preview overlay channels", () => {
     assert.equal(publishedMetadataKey("komodo", "alpha-security-preview"), "komodo-alpha-security-preview");
     assert.equal(publishedMetadataKey("komodo", "beta-security-preview"), "komodo-beta-security-preview");
+  });
+
+  it("securityPreviewOverlayKey and expandWithSecurityPreviewOverlays", () => {
+    assert.equal(securityPreviewOverlayKey("beta"), "beta-security-preview");
+    assert.equal(securityPreviewOverlayKey("beta-security-preview"), null);
+    assert.deepEqual(expandWithSecurityPreviewOverlays(["alpha", "beta"]), [
+      "alpha",
+      "beta",
+      "alpha-security-preview",
+      "beta-security-preview",
+    ]);
   });
 
   it("sortOtaChannelKeys dedupes and orders by rollout path", () => {
