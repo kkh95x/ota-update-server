@@ -14,6 +14,8 @@
 
 services:
   nginx:
+    ports:
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ../nginx/nginx.ssl-server.conf:/etc/nginx/conf.d/ssl-server.conf:ro
       - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro

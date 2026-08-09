@@ -6,6 +6,8 @@
 
 services:
   nginx:
+    ports:
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ../nginx/nginx.ssl-server.custom.conf:/etc/nginx/conf.d/ssl-server.conf:ro
       - ${SSL_CERT_DIR:?set SSL_CERT_DIR to your VPS cert folder}:/etc/nginx/ssl:ro

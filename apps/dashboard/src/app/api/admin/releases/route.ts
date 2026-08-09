@@ -57,7 +57,7 @@ export async function GET() {
 const createSchema = z.object({
   deviceModelId: z.string().min(1),
   versionLabel: z.string().min(1).max(120),
-  buildId: z.string().min(1).max(64),
+  buildId: z.string().min(1).max(128),
   incrementalBuild: z.string().min(1).max(32),
   postTimestamp: z.string().regex(/^\d{9,11}$/, "must be UTC epoch seconds"),
   channelKeys: z
@@ -79,50 +79,55 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_request", details: body.error.flatten() }, { status: 400 });
   }
 
-  const deviceModel = await prisma.deviceModel.findFirst({
-    where: { id: body.data.deviceModelId, isActive: true },
-  });
-  if (!deviceModel) {
-    return NextResponse.json({ error: "device_model_not_found" }, { status: 404 });
+  try {
+    const deviceModel = await prisma.deviceModel.findFirst({
+      where: { id: body.data.deviceModelId, isActive: true },
+    });
+    if (!deviceModel) {
+      return NextResponse.json({ error: "device_model_not_found" }, { status: 404 });
+    }
+
+    const { clientIp, forwardedFor } = extractClientIp(request.headers);
+    const channelKeys = sortOtaChannelKeys(body.data.channelKeys);
+    const channelKey = channelKeys[0]!;
+
+    const release = await prisma.release.create({
+      data: {
+        deviceModelId: body.data.deviceModelId,
+        versionLabel: body.data.versionLabel,
+        buildId: body.data.buildId,
+        incrementalBuild: body.data.incrementalBuild,
+        postTimestamp: body.data.postTimestamp,
+        channelKey,
+        targetChannelKeys: channelKeys,
+        changelog: body.data.changelog,
+        buildFingerprint: body.data.buildFingerprint,
+        androidVersion: body.data.androidVersion,
+        securityPatchLevel: body.data.securityPatchLevel,
+        status: ReleaseStatus.DRAFT,
+      },
+      include: { deviceModel: { select: { codename: true } } },
+    });
+
+    await writeAudit({
+      actorId: auth.session.userId,
+      action: "release.create",
+      targetType: "Release",
+      targetId: release.id,
+      metadata: {
+        codename: release.deviceModel.codename,
+        incrementalBuild: release.incrementalBuild,
+        channelKey: release.channelKey,
+        targetChannelKeys: release.targetChannelKeys,
+      },
+      clientIp,
+      forwardedFor,
+      result: "success",
+    });
+
+    return NextResponse.json({ release: { id: release.id, status: release.status } }, { status: 201 });
+  } catch (err) {
+    console.error("release.create failed", err);
+    return NextResponse.json({ error: "server_error" }, { status: 500 });
   }
-
-  const { clientIp, forwardedFor } = extractClientIp(request.headers);
-  const channelKeys = sortOtaChannelKeys(body.data.channelKeys);
-  const channelKey = channelKeys[0]!;
-
-  const release = await prisma.release.create({
-    data: {
-      deviceModelId: body.data.deviceModelId,
-      versionLabel: body.data.versionLabel,
-      buildId: body.data.buildId,
-      incrementalBuild: body.data.incrementalBuild,
-      postTimestamp: body.data.postTimestamp,
-      channelKey,
-      targetChannelKeys: channelKeys,
-      changelog: body.data.changelog,
-      buildFingerprint: body.data.buildFingerprint,
-      androidVersion: body.data.androidVersion,
-      securityPatchLevel: body.data.securityPatchLevel,
-      status: ReleaseStatus.DRAFT,
-    },
-    include: { deviceModel: { select: { codename: true } } },
-  });
-
-  await writeAudit({
-    actorId: auth.session.userId,
-    action: "release.create",
-    targetType: "Release",
-    targetId: release.id,
-    metadata: {
-      codename: release.deviceModel.codename,
-      incrementalBuild: release.incrementalBuild,
-      channelKey: release.channelKey,
-      targetChannelKeys: release.targetChannelKeys,
-    },
-    clientIp,
-    forwardedFor,
-    result: "success",
-  });
-
-  return NextResponse.json({ release: { id: release.id, status: release.status } }, { status: 201 });
 }

@@ -120,6 +120,15 @@ export default function ReleasesView() {
         body: JSON.stringify(form),
       });
       if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          error?: string;
+          details?: { fieldErrors?: Record<string, string[]> };
+        } | null;
+        if (data?.error === "invalid_request" && data.details?.fieldErrors) {
+          const first = Object.values(data.details.fieldErrors).flat()[0];
+          setFormError(first ?? "بيانات غير صالحة");
+          return;
+        }
         setFormError("فشل إنشاء الإصدار");
         return;
       }
