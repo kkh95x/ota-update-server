@@ -290,6 +290,34 @@ a {
   color: var(--muted);
 }
 
+.upload-progress-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin: 0.65rem 0 0;
+  padding: 0;
+}
+
+.upload-progress-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.upload-progress-stats dt {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.upload-progress-stats dd {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--cyan);
+}
+
 .publish-info {
   margin-bottom: 1rem;
 }

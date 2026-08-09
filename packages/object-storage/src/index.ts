@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  UploadPartCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -96,6 +100,123 @@ export async function presignPutObject(params: {
   });
   const signed = await getSignedUrl(s3, command, { expiresIn: params.expiresInSeconds ?? 3600 });
   return browserPresignedUrl(signed, nginxPathPrefix);
+}
+
+const MIN_MULTIPART_PART_BYTES = 5 * 1024 * 1024;
+
+/** Part count and size for S3 multipart (MinIO: 5 MiB min per part except the last). */
+export function planMultipartUpload(fileSize: number, preferredPartSize: number): {
+  partSize: number;
+  partCount: number;
+} {
+  if (fileSize <= 0) {
+    throw new Error("invalid_file_size");
+  }
+  let partSize = Math.max(MIN_MULTIPART_PART_BYTES, preferredPartSize);
+  let partCount = Math.ceil(fileSize / partSize);
+  const maxParts = 10_000;
+  if (partCount > maxParts) {
+    partSize = Math.ceil(fileSize / maxParts);
+    partCount = Math.ceil(fileSize / partSize);
+  }
+  return { partSize, partCount };
+}
+
+export async function createMultipartUpload(params: {
+  bucket: string;
+  objectKey: string;
+  contentType?: string;
+}): Promise<string> {
+  const s3 = getS3Client();
+  const result = await s3.send(
+    new CreateMultipartUploadCommand({
+      Bucket: params.bucket,
+      Key: params.objectKey,
+      ContentType: params.contentType ?? "application/zip",
+    }),
+  );
+  if (!result.UploadId) {
+    throw new Error("multipart_upload_id_missing");
+  }
+  return result.UploadId;
+}
+
+export async function presignUploadPart(params: {
+  bucket: string;
+  objectKey: string;
+  uploadId: string;
+  partNumber: number;
+  expiresInSeconds?: number;
+}): Promise<string> {
+  const env = loadEnv();
+  const { signingEndpoint, nginxPathPrefix } = resolvePublicS3Endpoint(env.S3_PUBLIC_ENDPOINT);
+  const s3 = new S3Client(s3ClientOptions(signingEndpoint, env.S3_FORCE_PATH_STYLE));
+  const command = new UploadPartCommand({
+    Bucket: params.bucket,
+    Key: params.objectKey,
+    UploadId: params.uploadId,
+    PartNumber: params.partNumber,
+  });
+  const signed = await getSignedUrl(s3, command, { expiresIn: params.expiresInSeconds ?? 3600 });
+  return browserPresignedUrl(signed, nginxPathPrefix);
+}
+
+export async function presignAllUploadParts(params: {
+  bucket: string;
+  objectKey: string;
+  uploadId: string;
+  partCount: number;
+  expiresInSeconds?: number;
+}): Promise<Array<{ partNumber: number; uploadUrl: string }>> {
+  const parts: Array<{ partNumber: number; uploadUrl: string }> = [];
+  for (let partNumber = 1; partNumber <= params.partCount; partNumber++) {
+    const uploadUrl = await presignUploadPart({
+      bucket: params.bucket,
+      objectKey: params.objectKey,
+      uploadId: params.uploadId,
+      partNumber,
+      expiresInSeconds: params.expiresInSeconds,
+    });
+    parts.push({ partNumber, uploadUrl });
+  }
+  return parts;
+}
+
+export async function completeMultipartUpload(params: {
+  bucket: string;
+  objectKey: string;
+  uploadId: string;
+  parts: Array<{ partNumber: number; etag: string }>;
+}): Promise<void> {
+  const s3 = getS3Client();
+  await s3.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: params.bucket,
+      Key: params.objectKey,
+      UploadId: params.uploadId,
+      MultipartUpload: {
+        Parts: params.parts
+          .slice()
+          .sort((a, b) => a.partNumber - b.partNumber)
+          .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+      },
+    }),
+  );
+}
+
+export async function abortMultipartUpload(params: {
+  bucket: string;
+  objectKey: string;
+  uploadId: string;
+}): Promise<void> {
+  const s3 = getS3Client();
+  await s3.send(
+    new AbortMultipartUploadCommand({
+      Bucket: params.bucket,
+      Key: params.objectKey,
+      UploadId: params.uploadId,
+    }),
+  );
 }
 
 export async function headObject(bucket: string, objectKey: string): Promise<{ size: bigint } | null> {

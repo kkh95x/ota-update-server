@@ -325,16 +325,19 @@ enum UploadStatus {
 }
 
 model UploadSession {
-  id           String       @id @default(cuid())
-  uploadedById String
-  uploadedBy   AdminUser    @relation(fields: [uploadedById], references: [id])
-  objectKey    String
-  expectedSize BigInt?
-  status       UploadStatus @default(CREATED)
-  expiresAt    DateTime
-  completedAt  DateTime?
-  createdAt    DateTime     @default(now())
-  validationJobs ValidationJob[]
+  id                 String       @id @default(cuid())
+  uploadedById       String
+  uploadedBy         AdminUser    @relation(fields: [uploadedById], references: [id])
+  objectKey          String
+  expectedSize       BigInt?
+  multipartUploadId  String?
+  partSize           Int?
+  partCount          Int?
+  status             UploadStatus @default(CREATED)
+  expiresAt          DateTime
+  completedAt        DateTime?
+  createdAt          DateTime     @default(now())
+  validationJobs     ValidationJob[]
 }
 
 model ValidationJob {

@@ -4,7 +4,14 @@ import { loadEnv } from "@custom-os-ota/configuration";
 import { prisma, OtaPackageType, ReleaseStatus, UploadStatus } from "@custom-os-ota/database";
 import { writeAudit } from "@custom-os-ota/audit";
 import { extractClientIp } from "@custom-os-ota/observability";
-import { presignPutObject, quarantineObjectKey } from "@custom-os-ota/object-storage";
+import {
+  abortMultipartUpload,
+  createMultipartUpload,
+  planMultipartUpload,
+  presignAllUploadParts,
+  presignPutObject,
+  quarantineObjectKey,
+} from "@custom-os-ota/object-storage";
 import { requireAdminApi, isAuthFailure } from "@/lib/api-auth";
 
 const createSchema = z.object({
@@ -42,6 +49,8 @@ export async function POST(request: Request) {
   }
 
   const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const presignTtlSeconds = 7200;
+  const useMultipart = body.data.expectedSize >= env.OTA_UPLOAD_MULTIPART_MIN_BYTES;
 
   const session = await prisma.uploadSession.create({
     data: {
@@ -54,48 +63,137 @@ export async function POST(request: Request) {
   });
 
   const objectKey = quarantineObjectKey(session.id, body.data.filename);
-  await prisma.uploadSession.update({
-    where: { id: session.id },
-    data: { objectKey },
-  });
+  let multipartUploadId: string | undefined;
 
-  const uploadUrl = await presignPutObject({
-    bucket: env.S3_BUCKET_QUARANTINE,
-    objectKey,
-    contentType: "application/zip",
-    expiresInSeconds: 7200,
-  });
-
-  const { clientIp, forwardedFor } = extractClientIp(request.headers);
-  await writeAudit({
-    actorId: auth.session.userId,
-    action: "upload.session.create",
-    targetType: "UploadSession",
-    targetId: session.id,
-    metadata: {
-      releaseId: release.id,
-      filename: body.data.filename,
-      expectedSize: body.data.expectedSize,
-    },
-    clientIp,
-    forwardedFor,
-    result: "success",
-  });
-
-  return NextResponse.json(
-    {
-      session: {
-        id: session.id,
-        uploadUrl,
+  try {
+    if (useMultipart) {
+      const { partSize, partCount } = planMultipartUpload(
+        body.data.expectedSize,
+        env.OTA_UPLOAD_PART_SIZE_BYTES,
+      );
+      multipartUploadId = await createMultipartUpload({
+        bucket: env.S3_BUCKET_QUARANTINE,
         objectKey,
-        expiresAt: expiresAt.toISOString(),
+        contentType: "application/zip",
+      });
+
+      await prisma.uploadSession.update({
+        where: { id: session.id },
+        data: {
+          objectKey,
+          multipartUploadId,
+          partSize,
+          partCount,
+        },
+      });
+
+      const parts = await presignAllUploadParts({
+        bucket: env.S3_BUCKET_QUARANTINE,
+        objectKey,
+        uploadId: multipartUploadId,
+        partCount,
+        expiresInSeconds: presignTtlSeconds,
+      });
+
+      const { clientIp, forwardedFor } = extractClientIp(request.headers);
+      await writeAudit({
+        actorId: auth.session.userId,
+        action: "upload.session.create",
+        targetType: "UploadSession",
+        targetId: session.id,
+        metadata: {
+          releaseId: release.id,
+          filename: body.data.filename,
+          expectedSize: body.data.expectedSize,
+          multipart: true,
+          partCount,
+          partSize,
+        },
+        clientIp,
+        forwardedFor,
+        result: "success",
+      });
+
+      return NextResponse.json(
+        {
+          session: {
+            id: session.id,
+            objectKey,
+            expiresAt: expiresAt.toISOString(),
+            releaseId: release.id,
+            packageType: body.data.packageType as OtaPackageType,
+            sourceIncremental: body.data.sourceIncremental ?? null,
+            filename: body.data.filename,
+            expectedSize: body.data.expectedSize,
+            uploadMode: "multipart" as const,
+            partSize,
+            partCount,
+            parallelParts: env.OTA_UPLOAD_PARALLEL_PARTS,
+            parts,
+          },
+        },
+        { status: 201 },
+      );
+    }
+
+    await prisma.uploadSession.update({
+      where: { id: session.id },
+      data: { objectKey },
+    });
+
+    const uploadUrl = await presignPutObject({
+      bucket: env.S3_BUCKET_QUARANTINE,
+      objectKey,
+      contentType: "application/zip",
+      expiresInSeconds: presignTtlSeconds,
+    });
+
+    const { clientIp, forwardedFor } = extractClientIp(request.headers);
+    await writeAudit({
+      actorId: auth.session.userId,
+      action: "upload.session.create",
+      targetType: "UploadSession",
+      targetId: session.id,
+      metadata: {
         releaseId: release.id,
-        packageType: body.data.packageType as OtaPackageType,
-        sourceIncremental: body.data.sourceIncremental ?? null,
         filename: body.data.filename,
         expectedSize: body.data.expectedSize,
+        multipart: false,
       },
-    },
-    { status: 201 },
-  );
+      clientIp,
+      forwardedFor,
+      result: "success",
+    });
+
+    return NextResponse.json(
+      {
+        session: {
+          id: session.id,
+          uploadUrl,
+          objectKey,
+          expiresAt: expiresAt.toISOString(),
+          releaseId: release.id,
+          packageType: body.data.packageType as OtaPackageType,
+          sourceIncremental: body.data.sourceIncremental ?? null,
+          filename: body.data.filename,
+          expectedSize: body.data.expectedSize,
+          uploadMode: "single" as const,
+        },
+      },
+      { status: 201 },
+    );
+  } catch (err) {
+    if (multipartUploadId) {
+      await abortMultipartUpload({
+        bucket: env.S3_BUCKET_QUARANTINE,
+        objectKey,
+        uploadId: multipartUploadId,
+      }).catch(() => undefined);
+    }
+    await prisma.uploadSession.update({
+      where: { id: session.id },
+      data: { status: UploadStatus.FAILED },
+    });
+    throw err;
+  }
 }

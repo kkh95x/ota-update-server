@@ -7,8 +7,9 @@ import AdminPageHeader from "@/components/admin-page-header";
 import FormField from "@/components/form-field";
 import { FORM_HELP } from "@/lib/form-field-help";
 import StatusBadge from "@/components/status-badge";
-import UploadProgress from "@/components/upload-progress";
+import UploadProgress, { type UploadProgressDetails } from "@/components/upload-progress";
 import { formatBytes, isSuspiciouslySmallPackage } from "@/lib/format-bytes";
+import { uploadMultipartParallel } from "@/lib/upload-multipart";
 import { putFileWithProgress } from "@/lib/upload-to-presigned-url";
 
 type ReleaseOption = {
@@ -21,13 +22,24 @@ type ReleaseOption = {
   channelKey?: string;
 };
 
-type ProgressState = {
-  label: string;
-  percent: number;
-  loaded?: number;
-  total?: number;
-  active: boolean;
+type ProgressState = UploadProgressDetails;
+
+type MultipartSession = {
+  id: string;
+  uploadMode: "multipart";
+  partSize: number;
+  partCount: number;
+  parallelParts: number;
+  parts: Array<{ partNumber: number; uploadUrl: string }>;
 };
+
+type SingleSession = {
+  id: string;
+  uploadMode: "single";
+  uploadUrl: string;
+};
+
+type UploadSessionResponse = MultipartSession | SingleSession;
 
 const FORM_ID = "upload-package-form";
 
@@ -87,7 +99,7 @@ export default function UploadsView() {
 
     setError(null);
     setUploading(true);
-    setProgress({ label: "جاري إنشاء جلسة الرفع…", percent: 0, active: true });
+    setProgress({ label: "جاري إنشاء جلسة الرفع…", percent: 0, active: true, indeterminate: true });
 
     try {
       const sessionRes = await fetch("/api/admin/uploads/sessions", {
@@ -108,28 +120,75 @@ export default function UploadsView() {
         return;
       }
 
-      const { session } = (await sessionRes.json()) as {
-        session: { id: string; uploadUrl: string };
-      };
+      const { session } = (await sessionRes.json()) as { session: UploadSessionResponse };
 
-      setProgress({
-        label: "جاري رفع الملف إلى MinIO…",
-        percent: 0,
-        loaded: 0,
-        total: file.size,
-        active: true,
-      });
+      let completedParts: Array<{ partNumber: number; etag: string }> | undefined;
 
-      await putFileWithProgress(session.uploadUrl, file, "application/zip", (loaded, total) => {
-        const percent = total > 0 ? (loaded / total) * 100 : 0;
+      if (session.uploadMode === "multipart") {
+        setProgress({
+          label: `جاري رفع الملف إلى MinIO (${session.partCount} جزء · ${session.parallelParts}× متوازي)…`,
+          percent: 0,
+          loaded: 0,
+          total: file.size,
+          active: true,
+          uploadMode: "multipart",
+          partSize: session.partSize,
+          parallelParts: session.parallelParts,
+          totalParts: session.partCount,
+          completedParts: 0,
+          activeParts: 0,
+        });
+
+        completedParts = await uploadMultipartParallel(
+          file,
+          session.parts,
+          session.partSize,
+          session.parallelParts,
+          (p) => {
+            setProgress({
+              label: `جاري رفع الملف إلى MinIO (${p.completedParts}/${p.totalParts} جزء · ${p.activeParts} نشط)…`,
+              percent: p.percent,
+              loaded: p.loaded,
+              total: p.total,
+              active: true,
+              speedBps: p.speedBps,
+              avgSpeedBps: p.avgSpeedBps,
+              etaSeconds: p.etaSeconds,
+              elapsedSeconds: p.elapsedSeconds,
+              uploadMode: "multipart",
+              partSize: session.partSize,
+              parallelParts: session.parallelParts,
+              totalParts: p.totalParts,
+              completedParts: p.completedParts,
+              activeParts: p.activeParts,
+            });
+          },
+        );
+      } else {
         setProgress({
           label: "جاري رفع الملف إلى MinIO…",
-          percent,
-          loaded,
-          total,
+          percent: 0,
+          loaded: 0,
+          total: file.size,
           active: true,
+          uploadMode: "single",
         });
-      });
+
+        await putFileWithProgress(session.uploadUrl, file, "application/zip", (snapshot) => {
+          setProgress({
+            label: "جاري رفع الملف إلى MinIO…",
+            percent: snapshot.percent,
+            loaded: snapshot.loaded,
+            total: snapshot.total,
+            active: true,
+            speedBps: snapshot.speedBps,
+            avgSpeedBps: snapshot.avgSpeedBps,
+            etaSeconds: snapshot.etaSeconds,
+            elapsedSeconds: snapshot.elapsedSeconds,
+            uploadMode: "single",
+          });
+        });
+      }
 
       setProgress({
         label: "جاري إتمام الرفع وبدء التحقق…",
@@ -137,6 +196,7 @@ export default function UploadsView() {
         loaded: file.size,
         total: file.size,
         active: true,
+        indeterminate: true,
       });
 
       const completeRes = await fetch(`/api/admin/uploads/sessions/${session.id}/complete`, {
@@ -147,6 +207,7 @@ export default function UploadsView() {
           packageType,
           sourceIncremental: packageType === "INCREMENTAL" ? sourceIncremental : undefined,
           filename: file.name,
+          parts: completedParts,
         }),
       });
 
@@ -161,7 +222,9 @@ export default function UploadsView() {
       setFile(null);
       await loadReleases();
     } catch (err) {
-      if (err instanceof Error && err.message === "upload_failed_413") {
+      if (err instanceof Error && err.message === "upload_missing_etag") {
+        setError("فشل رفع الملف — MinIO لم يُرجع ETag؛ تحقق من CORS (Expose-Headers: ETag) على /s3/");
+      } else if (err instanceof Error && err.message === "upload_failed_413") {
         setError("حجم الملف أكبر من حد nginx — حدّث ota-locations.conf (client_max_body_size على /s3/)");
       } else if (err instanceof Error && err.message === "upload_failed_400") {
         setError("فشل رفع الملف (400) — توقيع الرابط غير صالح؛ أعد بناء dashboard بعد تحديث object-storage");
@@ -255,7 +318,7 @@ export default function UploadsView() {
         open={dialogOpen}
         onClose={closeDialog}
         title="رفع حزمة OTA"
-        description="يُرفع الملف مباشرة إلى MinIO (حجر صحي)"
+        description="يُرفع الملف مباشرة إلى MinIO (multipart متوازي للملفات الكبيرة)"
         size="lg"
         footer={
           <DialogActions
@@ -368,7 +431,17 @@ export default function UploadsView() {
               loaded={progress.loaded}
               total={progress.total}
               active={progress.active}
-              indeterminate={progress.total == null && progress.percent === 0}
+              indeterminate={progress.indeterminate}
+              speedBps={progress.speedBps}
+              avgSpeedBps={progress.avgSpeedBps}
+              etaSeconds={progress.etaSeconds}
+              elapsedSeconds={progress.elapsedSeconds}
+              uploadMode={progress.uploadMode}
+              parallelParts={progress.parallelParts}
+              partSize={progress.partSize}
+              totalParts={progress.totalParts}
+              completedParts={progress.completedParts}
+              activeParts={progress.activeParts}
             />
           )}
         </form>

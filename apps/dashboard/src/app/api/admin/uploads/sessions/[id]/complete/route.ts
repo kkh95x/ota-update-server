@@ -9,17 +9,23 @@ import {
 } from "@custom-os-ota/database";
 import { writeAudit } from "@custom-os-ota/audit";
 import { extractClientIp } from "@custom-os-ota/observability";
-import { headObject } from "@custom-os-ota/object-storage";
+import { abortMultipartUpload, completeMultipartUpload, headObject } from "@custom-os-ota/object-storage";
 import { requireAdminApi, isAuthFailure } from "@/lib/api-auth";
 import { enqueueValidationJob } from "@/lib/queue";
 
 type Params = { params: Promise<{ id: string }> };
+
+const partSchema = z.object({
+  partNumber: z.number().int().positive(),
+  etag: z.string().min(1),
+});
 
 const completeSchema = z.object({
   releaseId: z.string().min(1),
   packageType: z.enum(["FULL", "INCREMENTAL"]),
   sourceIncremental: z.string().optional(),
   filename: z.string().min(1),
+  parts: z.array(partSchema).optional(),
 });
 
 export async function POST(request: Request, { params }: Params) {
@@ -50,8 +56,43 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   const env = loadEnv();
+
+  if (session.multipartUploadId) {
+    if (!body.data.parts?.length) {
+      return NextResponse.json({ error: "multipart_parts_required" }, { status: 400 });
+    }
+    if (session.partCount && body.data.parts.length !== session.partCount) {
+      return NextResponse.json(
+        {
+          error: "part_count_mismatch",
+          expected: session.partCount,
+          actual: body.data.parts.length,
+        },
+        { status: 400 },
+      );
+    }
+
+    try {
+      await completeMultipartUpload({
+        bucket: env.S3_BUCKET_QUARANTINE,
+        objectKey: session.objectKey,
+        uploadId: session.multipartUploadId,
+        parts: body.data.parts,
+      });
+    } catch {
+      return NextResponse.json({ error: "multipart_complete_failed" }, { status: 400 });
+    }
+  }
+
   const head = await headObject(env.S3_BUCKET_QUARANTINE, session.objectKey);
   if (!head) {
+    if (session.multipartUploadId) {
+      await abortMultipartUpload({
+        bucket: env.S3_BUCKET_QUARANTINE,
+        objectKey: session.objectKey,
+        uploadId: session.multipartUploadId,
+      }).catch(() => undefined);
+    }
     return NextResponse.json({ error: "object_not_found" }, { status: 400 });
   }
 
@@ -119,6 +160,8 @@ export async function POST(request: Request, { params }: Params) {
       releaseId: release.id,
       packageId: result.otaPackage.id,
       validationJobId: result.validationJob.id,
+      multipart: Boolean(session.multipartUploadId),
+      partCount: session.partCount,
     },
     clientIp,
     forwardedFor,
