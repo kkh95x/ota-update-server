@@ -8,10 +8,17 @@ import {
   ValidationStatus,
 } from "@custom-os-ota/database";
 import { writeAudit } from "@custom-os-ota/audit";
-import { extractClientIp } from "@custom-os-ota/observability";
-import { abortMultipartUpload, completeMultipartUpload, headObject } from "@custom-os-ota/object-storage";
+import { createLogger, extractClientIp } from "@custom-os-ota/observability";
+import {
+  abortMultipartUpload,
+  completeMultipartUpload,
+  headObject,
+  listMultipartParts,
+} from "@custom-os-ota/object-storage";
 import { requireAdminApi, isAuthFailure } from "@/lib/api-auth";
 import { enqueueValidationJob } from "@/lib/queue";
+
+const log = createLogger("upload-complete");
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -35,7 +42,7 @@ export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
   const body = completeSchema.safeParse(await request.json());
   if (!body.success) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    return NextResponse.json({ error: "invalid_request", details: body.error.flatten() }, { status: 400 });
   }
 
   const session = await prisma.uploadSession.findUnique({ where: { id } });
@@ -72,15 +79,61 @@ export async function POST(request: Request, { params }: Params) {
       );
     }
 
+    let listedParts: Awaited<ReturnType<typeof listMultipartParts>>;
     try {
+      listedParts = await listMultipartParts({
+        bucket: env.S3_BUCKET_QUARANTINE,
+        objectKey: session.objectKey,
+        uploadId: session.multipartUploadId,
+      });
+    } catch (err) {
+      log.error("list_multipart_parts_failed", {
+        event: "upload.complete.list_parts_failed",
+        targetId: session.id,
+        metadata: { message: err instanceof Error ? err.message : "unknown" },
+        result: "failure",
+      });
+      return NextResponse.json({ error: "multipart_list_failed" }, { status: 400 });
+    }
+
+    if (session.partCount && listedParts.length !== session.partCount) {
+      return NextResponse.json(
+        {
+          error: "multipart_parts_missing_on_server",
+          expected: session.partCount,
+          found: listedParts.length,
+          hint: "Part PUTs did not reach MinIO — ensure nginx uses location ^~ /s3/ and recreate nginx",
+        },
+        { status: 400 },
+      );
+    }
+
+    try {
+      // Use MinIO-reported ETags (authoritative), not browser-provided values.
       await completeMultipartUpload({
         bucket: env.S3_BUCKET_QUARANTINE,
         objectKey: session.objectKey,
         uploadId: session.multipartUploadId,
-        parts: body.data.parts,
+        parts: listedParts.map((p) => ({ partNumber: p.partNumber, etag: p.etag })),
       });
-    } catch {
-      return NextResponse.json({ error: "multipart_complete_failed" }, { status: 400 });
+    } catch (err) {
+      log.error("multipart_complete_failed", {
+        event: "upload.complete.multipart_failed",
+        targetId: session.id,
+        metadata: {
+          partCount: listedParts.length,
+          message: err instanceof Error ? err.message : "unknown",
+        },
+        result: "failure",
+      });
+      return NextResponse.json(
+        {
+          error: "multipart_complete_failed",
+          partsOnServer: listedParts.length,
+          message: err instanceof Error ? err.message : "unknown",
+        },
+        { status: 400 },
+      );
     }
   }
 
@@ -146,10 +199,24 @@ export async function POST(request: Request, { params }: Params) {
     return { otaPackage, validationJob };
   });
 
-  await enqueueValidationJob({
-    validationJobId: result.validationJob.id,
-    uploadSessionId: session.id,
-  });
+  let validationQueued = true;
+  try {
+    await enqueueValidationJob({
+      validationJobId: result.validationJob.id,
+      uploadSessionId: session.id,
+    });
+  } catch (err) {
+    validationQueued = false;
+    log.error("validation_enqueue_failed", {
+      event: "upload.complete.enqueue_failed",
+      targetId: session.id,
+      metadata: {
+        validationJobId: result.validationJob.id,
+        message: err instanceof Error ? err.message : "unknown",
+      },
+      result: "failure",
+    });
+  }
 
   await writeAudit({
     actorId: auth.session.userId,
@@ -162,6 +229,7 @@ export async function POST(request: Request, { params }: Params) {
       validationJobId: result.validationJob.id,
       multipart: Boolean(session.multipartUploadId),
       partCount: session.partCount,
+      validationQueued,
     },
     clientIp,
     forwardedFor,
@@ -172,5 +240,6 @@ export async function POST(request: Request, { params }: Params) {
     ok: true,
     packageId: result.otaPackage.id,
     validationJobId: result.validationJob.id,
+    validationQueued,
   });
 }

@@ -231,6 +231,47 @@ a {
   color: var(--warn);
 }
 
+.upload-error-panel {
+  margin-top: 0.75rem;
+}
+
+.upload-error-summary {
+  margin: 0 0 0.65rem;
+  color: var(--danger);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.upload-error-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.45rem 0.75rem;
+  margin: 0;
+  padding: 0;
+}
+
+.upload-error-details div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.upload-error-details dt {
+  margin: 0;
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.upload-error-details dd {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #ffb3c6;
+  word-break: break-word;
+}
+
 .upload-progress {
   margin-top: 0.75rem;
   padding: 0.85rem 1rem;

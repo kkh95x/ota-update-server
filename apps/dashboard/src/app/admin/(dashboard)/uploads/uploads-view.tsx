@@ -8,7 +8,13 @@ import FormField from "@/components/form-field";
 import { FORM_HELP } from "@/lib/form-field-help";
 import StatusBadge from "@/components/status-badge";
 import UploadProgress, { type UploadProgressDetails } from "@/components/upload-progress";
+import UploadErrorPanel from "@/components/upload-error-panel";
 import { formatBytes, isSuspiciouslySmallPackage } from "@/lib/format-bytes";
+import {
+  readUploadApiError,
+  uploadErrorFromTransport,
+  type UploadErrorDetails,
+} from "@/lib/upload-api-error";
 import { uploadMultipartParallel } from "@/lib/upload-multipart";
 import { putFileWithProgress } from "@/lib/upload-to-presigned-url";
 
@@ -52,7 +58,8 @@ export default function UploadsView() {
   const [sourceIncremental, setSourceIncremental] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<UploadErrorDetails | null>(null);
+  const [pageError, setPageError] = useState<UploadErrorDetails | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -67,7 +74,13 @@ export default function UploadsView() {
 
   useEffect(() => {
     loadReleases()
-      .catch(() => setError("تعذر تحميل الإصدارات"))
+      .catch(() =>
+        setPageError({
+          summary: "تعذر تحميل الإصدارات",
+          code: "releases_load_failed",
+          httpStatus: 0,
+        }),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -82,14 +95,14 @@ export default function UploadsView() {
     setSourceIncremental("");
     setFile(null);
     setProgress(null);
-    setError(null);
+    setUploadError(null);
     setDialogOpen(true);
   }
 
   function closeDialog() {
     if (uploading) return;
     setDialogOpen(false);
-    setError(null);
+    setUploadError(null);
     setProgress(null);
   }
 
@@ -97,7 +110,7 @@ export default function UploadsView() {
     e.preventDefault();
     if (!file || !releaseId) return;
 
-    setError(null);
+    setUploadError(null);
     setUploading(true);
     setProgress({ label: "جاري إنشاء جلسة الرفع…", percent: 0, active: true, indeterminate: true });
 
@@ -115,7 +128,7 @@ export default function UploadsView() {
       });
 
       if (!sessionRes.ok) {
-        setError("فشل إنشاء جلسة الرفع");
+        setUploadError(await readUploadApiError(sessionRes, "session"));
         setProgress(null);
         return;
       }
@@ -212,30 +225,26 @@ export default function UploadsView() {
       });
 
       if (!completeRes.ok) {
-        setError("فشل إتمام الرفع");
+        setUploadError(await readUploadApiError(completeRes, "complete"));
         setProgress(null);
         return;
       }
 
+      const completeBody = (await completeRes.json()) as { validationQueued?: boolean };
       setDialogOpen(false);
-      setToast("تم الرفع بنجاح — جاري التحقق في Worker");
+      setToast(
+        completeBody.validationQueued === false
+          ? "تم الرفع — التحقق في قائمة الانتظار (أعد تشغيل worker إن لزم)"
+          : "تم الرفع بنجاح — جاري التحقق في Worker",
+      );
       setFile(null);
       await loadReleases();
     } catch (err) {
-      if (err instanceof Error && err.message === "upload_missing_etag") {
-        setError("فشل رفع الملف — MinIO لم يُرجع ETag؛ تحقق من CORS (Expose-Headers: ETag) على /s3/");
-      } else if (err instanceof Error && err.message === "upload_failed_413") {
-        setError("حجم الملف أكبر من حد nginx — حدّث ota-locations.conf (client_max_body_size على /s3/)");
-      } else if (err instanceof Error && err.message === "upload_failed_400") {
-        setError("فشل رفع الملف (400) — توقيع الرابط غير صالح؛ أعد بناء dashboard بعد تحديث object-storage");
-      } else if (err instanceof Error && err.message.startsWith("upload_failed_")) {
-        const code = err.message.replace("upload_failed_", "");
-        setError(`فشل رفع الملف (HTTP ${code}) — تحقق من S3_PUBLIC_ENDPOINT و CORS`);
-      } else if (err instanceof Error && err.message === "upload_network_error") {
-        setError("فشل رفع الملف — تحقق من CORS أو تطابق http/https مع S3_PUBLIC_ENDPOINT");
-      } else {
-        setError("تعذر الاتصال بالخادم");
-      }
+      setUploadError(err instanceof Error ? uploadErrorFromTransport(err) : {
+        summary: "تعذر الاتصال بالخادم",
+        code: "unknown_error",
+        httpStatus: 0,
+      });
       setProgress(null);
     } finally {
       setUploading(false);
@@ -265,6 +274,8 @@ export default function UploadsView() {
           </button>
         </div>
       )}
+
+      {pageError && <UploadErrorPanel error={pageError} />}
 
       <div className="admin-panel">
         <div className="panel-heading">
@@ -423,7 +434,7 @@ export default function UploadsView() {
             )}
           </FormField>
 
-          {error && <p className="error">{error}</p>}
+          {uploadError && <UploadErrorPanel error={uploadError} />}
           {progress && (
             <UploadProgress
               label={progress.label}

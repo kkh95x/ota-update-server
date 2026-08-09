@@ -7,6 +7,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListPartsCommand,
   PutObjectCommand,
   UploadPartCommand,
   S3Client,
@@ -182,6 +183,49 @@ export async function presignAllUploadParts(params: {
   return parts;
 }
 
+/** S3 expects quoted ETags; browsers may strip or alter them. */
+export function normalizePartEtag(etag: string): string {
+  const trimmed = etag.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.startsWith("W/")) return trimmed;
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) return trimmed;
+  return `"${trimmed.replace(/^"|"$/g, "")}"`;
+}
+
+export async function listMultipartParts(params: {
+  bucket: string;
+  objectKey: string;
+  uploadId: string;
+}): Promise<Array<{ partNumber: number; etag: string; size: number }>> {
+  const s3 = getS3Client();
+  const parts: Array<{ partNumber: number; etag: string; size: number }> = [];
+  let partNumberMarker: string | undefined;
+
+  for (;;) {
+    const result = await s3.send(
+      new ListPartsCommand({
+        Bucket: params.bucket,
+        Key: params.objectKey,
+        UploadId: params.uploadId,
+        PartNumberMarker: partNumberMarker,
+      }),
+    );
+    for (const part of result.Parts ?? []) {
+      if (part.PartNumber != null && part.ETag && part.Size != null) {
+        parts.push({
+          partNumber: part.PartNumber,
+          etag: part.ETag,
+          size: part.Size,
+        });
+      }
+    }
+    if (!result.IsTruncated || result.NextPartNumberMarker == null) break;
+    partNumberMarker = String(result.NextPartNumberMarker);
+  }
+
+  return parts.sort((a, b) => a.partNumber - b.partNumber);
+}
+
 export async function completeMultipartUpload(params: {
   bucket: string;
   objectKey: string;
@@ -198,7 +242,10 @@ export async function completeMultipartUpload(params: {
         Parts: params.parts
           .slice()
           .sort((a, b) => a.partNumber - b.partNumber)
-          .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+          .map((p) => ({
+            PartNumber: p.partNumber,
+            ETag: normalizePartEtag(p.etag),
+          })),
       },
     }),
   );

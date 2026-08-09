@@ -48,8 +48,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "source_incremental_required" }, { status: 400 });
   }
 
-  const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
-  const presignTtlSeconds = 7200;
+  const expiresAt = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const presignTtlSeconds = 14_400;
   const useMultipart = body.data.expectedSize >= env.OTA_UPLOAD_MULTIPART_MIN_BYTES;
 
   const session = await prisma.uploadSession.create({
