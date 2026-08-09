@@ -137,6 +137,19 @@ export async function validateSession(sessionToken: string): Promise<{ userId: s
   return { userId: session.userId };
 }
 
+/** Extend idle window (e.g. before long direct-to-MinIO uploads with no API traffic). */
+export async function extendSessionIdle(sessionToken: string, idleMs: number): Promise<boolean> {
+  const result = await prisma.adminSession.updateMany({
+    where: {
+      tokenHash: hashToken(sessionToken),
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    data: { idleExpiresAt: new Date(Date.now() + idleMs) },
+  });
+  return result.count > 0;
+}
+
 export async function revokeSession(sessionToken: string, actorId?: string): Promise<void> {
   await prisma.adminSession.updateMany({
     where: { tokenHash: hashToken(sessionToken), revokedAt: null },

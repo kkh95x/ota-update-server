@@ -44,6 +44,10 @@ function completeErrorSummary(code: string, body: ApiErrorBody, httpStatus: numb
       return "فشل إتمام الرفع — الإصدار غير موجود.";
     case "not_found":
       return "فشل إتمام الرفع — جلسة الرفع غير موجودة.";
+    case "unauthorized":
+      return "انتهت جلسة تسجيل الدخول أثناء الرفع — الملف على MinIO لكن لا يمكن إتمامه. سجّل الدخول مجدداً.";
+    case "forbidden":
+      return "ليس لديك صلاحية إتمام الرفع.";
     default:
       if (httpStatus >= 500) {
         return "فشل إتمام الرفع — خطأ في الخادم (قاعدة البيانات / Redis / MinIO).";
@@ -54,6 +58,10 @@ function completeErrorSummary(code: string, body: ApiErrorBody, httpStatus: numb
 
 function sessionErrorSummary(code: string, httpStatus: number): string {
   switch (code) {
+    case "unauthorized":
+      return "انتهت جلسة تسجيل الدخول — سجّل الدخول مجدداً وأعد الرفع.";
+    case "forbidden":
+      return "ليس لديك صلاحية رفع الحزم.";
     case "file_too_large":
       return "حجم الملف أكبر من الحد المسموح (OTA_MAX_PACKAGE_BYTES).";
     case "release_not_found":
@@ -79,9 +87,11 @@ export function uploadErrorFromComplete(httpStatus: number, body: ApiErrorBody):
     message: body.message,
     hint:
       body.hint ??
-      (code === "multipart_parts_missing_on_server"
-        ? "nginx: location ^~ /s3/ ثم docker compose up -d --force-recreate nginx"
-        : undefined),
+      (code === "unauthorized"
+        ? "الرفع إلى MinIO لا يحدّث جلسة الدخول — بعد تحديث dashboard يُرسل keepalive تلقائياً أثناء الرفع"
+        : code === "multipart_parts_missing_on_server"
+          ? "nginx: location ^~ /s3/ ثم docker compose up -d --force-recreate nginx"
+          : undefined),
     extra: {
       expected: body.expected,
       actual: body.actual,
@@ -99,6 +109,10 @@ export function uploadErrorFromSession(httpStatus: number, body: ApiErrorBody): 
     code,
     httpStatus,
     message: typeof body.message === "string" ? body.message : undefined,
+    hint:
+      code === "unauthorized"
+        ? "سجّل الدخول من /admin/login ثم ابدأ رفعاً جديداً"
+        : undefined,
     extra: body.details ? { details: body.details } : undefined,
   };
 }

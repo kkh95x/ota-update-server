@@ -16,6 +16,7 @@ import {
   type UploadErrorDetails,
 } from "@/lib/upload-api-error";
 import { uploadMultipartParallel } from "@/lib/upload-multipart";
+import { startUploadSessionKeepalive } from "@/lib/session-keepalive";
 import { putFileWithProgress } from "@/lib/upload-to-presigned-url";
 
 type ReleaseOption = {
@@ -114,6 +115,8 @@ export default function UploadsView() {
     setUploading(true);
     setProgress({ label: "جاري إنشاء جلسة الرفع…", percent: 0, active: true, indeterminate: true });
 
+    let authKeepalive: ReturnType<typeof startUploadSessionKeepalive> | undefined;
+
     try {
       const sessionRes = await fetch("/api/admin/uploads/sessions", {
         method: "POST",
@@ -134,6 +137,8 @@ export default function UploadsView() {
       }
 
       const { session } = (await sessionRes.json()) as { session: UploadSessionResponse };
+
+      authKeepalive = startUploadSessionKeepalive();
 
       let completedParts: Array<{ partNumber: number; etag: string }> | undefined;
 
@@ -203,6 +208,8 @@ export default function UploadsView() {
         });
       }
 
+      await authKeepalive.ping();
+
       setProgress({
         label: "جاري إتمام الرفع وبدء التحقق…",
         percent: 100,
@@ -247,6 +254,7 @@ export default function UploadsView() {
       });
       setProgress(null);
     } finally {
+      authKeepalive?.stop();
       setUploading(false);
     }
   }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
+import { extendSessionIdle } from "@custom-os-ota/auth";
 import { loadEnv } from "@custom-os-ota/configuration";
 import { prisma, OtaPackageType, ReleaseStatus, UploadStatus } from "@custom-os-ota/database";
 import { writeAudit } from "@custom-os-ota/audit";
@@ -13,6 +15,9 @@ import {
   quarantineObjectKey,
 } from "@custom-os-ota/object-storage";
 import { requireAdminApi, isAuthFailure } from "@/lib/api-auth";
+import { SESSION_COOKIE } from "@/lib/session-cookie";
+
+const UPLOAD_IDLE_MS = 4 * 60 * 60 * 1000;
 
 const createSchema = z.object({
   filename: z.string().min(1).max(255),
@@ -25,6 +30,11 @@ const createSchema = z.object({
 export async function POST(request: Request) {
   const auth = await requireAdminApi("upload.create");
   if (isAuthFailure(auth)) return auth.error;
+
+  const sessionToken = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (sessionToken) {
+    await extendSessionIdle(sessionToken, UPLOAD_IDLE_MS);
+  }
 
   const body = createSchema.safeParse(await request.json());
   if (!body.success) {

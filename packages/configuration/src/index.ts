@@ -31,7 +31,7 @@ const envSchema = z.object({
   /** Multipart part size for browser uploads (MinIO minimum 5 MiB per part). */
   OTA_UPLOAD_PART_SIZE_BYTES: z.coerce.number().int().positive().default(64 * 1024 * 1024),
   /** Concurrent part uploads from the browser. */
-  OTA_UPLOAD_PARALLEL_PARTS: z.coerce.number().int().positive().max(16).default(6),
+  OTA_UPLOAD_PARALLEL_PARTS: z.coerce.number().int().positive().max(16).default(15),
   /** Files at or above this size use multipart; smaller files use a single PUT. */
   OTA_UPLOAD_MULTIPART_MIN_BYTES: z.coerce.number().int().positive().default(100 * 1024 * 1024),
   ROLLOUT_HASH_SECRET: z.string().min(32),
