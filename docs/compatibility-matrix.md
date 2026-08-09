@@ -40,7 +40,7 @@
 | HTTP Range | Strongly recommended | CDN / nginx |
 | Channels stable / beta / alpha | Yes | Dashboard-managed |
 | Internal channel (e.g. testing) | Yes | ADB `sys.update.channel` |
-| Security preview channel | Yes | `{device}-stable-security-preview` |
+| Security preview overlay | Yes | `{device}-{base}-security-preview` (e.g. `komodo-beta-security-preview`) |
 | Device codename in URL | Yes | Must match Pixel codename |
 | Factory images | No (Updater) | Optional co-host |
 

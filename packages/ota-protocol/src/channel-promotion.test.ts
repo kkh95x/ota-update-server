@@ -40,8 +40,15 @@ describe("channel promotion metadata", () => {
   it("isValidOtaChannelKey accepts standard and grp channels", () => {
     assert.equal(isValidOtaChannelKey("testing"), true);
     assert.equal(isValidOtaChannelKey("stable-security-preview"), true);
+    assert.equal(isValidOtaChannelKey("alpha-security-preview"), true);
+    assert.equal(isValidOtaChannelKey("beta-security-preview"), true);
     assert.equal(isValidOtaChannelKey("grp-lab-damascus"), true);
     assert.equal(isValidOtaChannelKey("invalid channel"), false);
+  });
+
+  it("publishedMetadataKey for security preview overlay channels", () => {
+    assert.equal(publishedMetadataKey("komodo", "alpha-security-preview"), "komodo-alpha-security-preview");
+    assert.equal(publishedMetadataKey("komodo", "beta-security-preview"), "komodo-beta-security-preview");
   });
 
   it("sortOtaChannelKeys dedupes and orders by rollout path", () => {

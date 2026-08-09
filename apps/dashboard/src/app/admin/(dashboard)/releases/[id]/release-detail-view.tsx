@@ -11,6 +11,7 @@ import StatusBadge from "@/components/status-badge";
 import { formatBytes, isSuspiciouslySmallPackage } from "@/lib/format-bytes";
 import { releaseStatusHint } from "@/lib/release-status-hints";
 import { RELEASE_APPROVALS_REQUIRED } from "@/lib/release-approval";
+import { RECOMMENDED_CHANNEL_ORDER } from "@custom-os-ota/ota-protocol";
 
 type ChannelPublication = {
   id: string;
@@ -45,7 +46,7 @@ type ReleaseDetail = {
   approvals: { approverEmail: string; approverName: string | null; note: string | null; createdAt: string }[];
 };
 
-const PROMOTABLE_CHANNELS = ["testing", "alpha", "beta", "stable", "stable-security-preview"] as const;
+const PROMOTABLE_CHANNELS = RECOMMENDED_CHANNEL_ORDER;
 
 const FORM_ID = "approve-release-form";
 
