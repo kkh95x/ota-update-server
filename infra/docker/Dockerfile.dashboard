@@ -39,6 +39,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+ENV AWS_REQUEST_CHECKSUM_CALCULATION=WHEN_REQUIRED
+ENV AWS_RESPONSE_CHECKSUM_VALIDATION=WHEN_REQUIRED
 RUN addgroup -S ota && adduser -S ota -G ota
 COPY --from=builder /app/apps/dashboard/.next/standalone ./
 COPY --from=builder /app/apps/dashboard/.next/static ./apps/dashboard/.next/static
