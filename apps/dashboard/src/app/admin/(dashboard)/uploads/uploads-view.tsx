@@ -161,8 +161,11 @@ export default function UploadsView() {
       setFile(null);
       await loadReleases();
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith("upload_")) {
-        setError("فشل رفع الملف — تحقق من CORS على MinIO");
+      if (err instanceof Error && err.message.startsWith("upload_failed_")) {
+        const code = err.message.replace("upload_failed_", "");
+        setError(`فشل رفع الملف (HTTP ${code}) — تحقق من S3_PUBLIC_ENDPOINT و CORS`);
+      } else if (err instanceof Error && err.message === "upload_network_error") {
+        setError("فشل رفع الملف — تحقق من CORS أو تطابق http/https مع S3_PUBLIC_ENDPOINT");
       } else {
         setError("تعذر الاتصال بالخادم");
       }

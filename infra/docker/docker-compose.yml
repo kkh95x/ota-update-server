@@ -149,7 +149,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
       # Browser presigned uploads (same origin via nginx /s3/); global CORS for community MinIO
-      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-https://release.mod-syria.org,http://localhost:3000}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-https://release.mod-syria.org,http://release.mod-syria.org,http://localhost:3000}
       MINIO_API_REQUESTS_MAX: ${MINIO_API_REQUESTS_MAX:-10000}
     volumes:
       - minio_data:/data
